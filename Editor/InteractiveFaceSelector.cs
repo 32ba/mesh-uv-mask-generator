@@ -877,22 +877,46 @@ namespace MeshUVMaskGenerator
                                  skinnedRenderer != null ? skinnedRenderer.sharedMaterials : null;
             
             if (materials == null || materials.Length == 0)
+            {
+                Debug.LogWarning("[UV Mask Generator] No materials found on target object");
                 return similarFaces;
+            }
                 
             // Get reference face's material and UV coordinates
             int materialIndex = GetFaceMaterialIndex(referenceFaceIndex);
             if (materialIndex >= materials.Length || materials[materialIndex] == null)
+            {
+                Debug.LogWarning($"[UV Mask Generator] Invalid material index {materialIndex} for face {referenceFaceIndex}");
                 return similarFaces;
+            }
                 
             Material material = materials[materialIndex];
             Texture2D texture = material.mainTexture as Texture2D;
             
             if (texture == null)
+            {
+                Debug.LogWarning($"[UV Mask Generator] No main texture found on material {material.name}");
                 return similarFaces;
+            }
+            
+            // Check if texture is readable
+            if (!texture.isReadable)
+            {
+                Debug.LogError($"[UV Mask Generator] Texture '{texture.name}' is not readable. Please enable 'Read/Write Enabled' in texture import settings.");
+                return similarFaces;
+            }
                 
             // Sample color from reference face
             Color referenceColor = SampleFaceColor(referenceFaceIndex, texture);
+            if (referenceColor == Color.clear) // Invalid color sample
+            {
+                Debug.LogWarning($"[UV Mask Generator] Failed to sample color from reference face {referenceFaceIndex}");
+                return similarFaces;
+            }
             
+            Debug.Log($"[UV Mask Generator] Reference color: {referenceColor}, Threshold: {colorThreshold}");
+            
+            int matchCount = 0;
             // Find all faces with similar colors
             foreach (var kvp in faceToTriangles)
             {
@@ -904,13 +928,17 @@ namespace MeshUVMaskGenerator
                     continue;
                     
                 Color faceColor = SampleFaceColor(faceIndex, texture);
+                if (faceColor == Color.clear) // Invalid color sample
+                    continue;
                 
                 if (IsColorSimilar(referenceColor, faceColor, colorThreshold))
                 {
                     similarFaces.Add(faceIndex);
+                    matchCount++;
                 }
             }
             
+            Debug.Log($"[UV Mask Generator] Found {matchCount} similar faces with threshold {colorThreshold}");
             return similarFaces;
         }
         
@@ -989,51 +1017,113 @@ namespace MeshUVMaskGenerator
         {
             Vector2[] uvs = targetMesh.uv;
             if (uvs == null || uvs.Length == 0)
-                return Color.white;
+            {
+                return Color.clear; // Return clear instead of white to indicate error
+            }
                 
             List<int> triangleIndices = faceToTriangles[faceIndex];
-            
-            // Sample color from face center UV
-            Vector2 centerUV = (uvs[triangleIndices[0]] + uvs[triangleIndices[1]] + uvs[triangleIndices[2]]) / 3f;
-            
-            // Clamp UV coordinates
-            centerUV.x = Mathf.Clamp01(centerUV.x);
-            centerUV.y = Mathf.Clamp01(centerUV.y);
-            
-            // Sample texture
-            int x = Mathf.FloorToInt(centerUV.x * (texture.width - 1));
-            int y = Mathf.FloorToInt(centerUV.y * (texture.height - 1));
-            
-            try
+            if (triangleIndices == null || triangleIndices.Count < 3)
             {
-                return texture.GetPixel(x, y);
+                return Color.clear;
             }
-            catch
+            
+            // Check if all UV indices are valid
+            foreach (int index in triangleIndices)
             {
-                return Color.white;
+                if (index < 0 || index >= uvs.Length)
+                {
+                    return Color.clear;
+                }
             }
+            
+            // Sample color from multiple points for better accuracy
+            Vector2[] sampleUVs = new Vector2[]
+            {
+                uvs[triangleIndices[0]],
+                uvs[triangleIndices[1]], 
+                uvs[triangleIndices[2]],
+                (uvs[triangleIndices[0]] + uvs[triangleIndices[1]] + uvs[triangleIndices[2]]) / 3f // Face center
+            };
+            
+            List<Color> sampledColors = new List<Color>();
+            
+            foreach (Vector2 uv in sampleUVs)
+            {
+                // Handle UV wrapping properly
+                Vector2 clampedUV = new Vector2(
+                    uv.x - Mathf.Floor(uv.x), // Wrap to 0-1 range
+                    uv.y - Mathf.Floor(uv.y)
+                );
+                
+                // Sample texture
+                int x = Mathf.Clamp(Mathf.FloorToInt(clampedUV.x * texture.width), 0, texture.width - 1);
+                int y = Mathf.Clamp(Mathf.FloorToInt(clampedUV.y * texture.height), 0, texture.height - 1);
+                
+                try
+                {
+                    Color sampledColor = texture.GetPixel(x, y);
+                    sampledColors.Add(sampledColor);
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogWarning($"[UV Mask Generator] Failed to sample texture at ({x}, {y}): {e.Message}");
+                    continue;
+                }
+            }
+            
+            if (sampledColors.Count == 0)
+            {
+                return Color.clear;
+            }
+            
+            // Return average color
+            Color avgColor = Color.black;
+            foreach (Color color in sampledColors)
+            {
+                avgColor += color;
+            }
+            avgColor /= sampledColors.Count;
+            
+            return avgColor;
         }
         
         private bool IsColorSimilar(Color color1, Color color2, float threshold)
         {
+            // Skip comparison if either color is invalid
+            if (color1 == Color.clear || color2 == Color.clear)
+                return false;
+                
             if (useHSVComparison)
             {
                 Color.RGBToHSV(color1, out float h1, out float s1, out float v1);
                 Color.RGBToHSV(color2, out float h2, out float s2, out float v2);
                 
-                float hDiff = Mathf.Min(Mathf.Abs(h1 - h2), 1f - Mathf.Abs(h1 - h2)); // Handle hue wraparound
+                // Special handling for grayscale colors (low saturation)
+                if (s1 < 0.1f && s2 < 0.1f)
+                {
+                    // For grayscale, only compare value (brightness)
+                    return Mathf.Abs(v1 - v2) < threshold;
+                }
+                
+                // Handle hue wraparound (0 and 1 are the same hue)
+                float hDiff = Mathf.Min(Mathf.Abs(h1 - h2), 1f - Mathf.Abs(h1 - h2));
                 float sDiff = Mathf.Abs(s1 - s2);
                 float vDiff = Mathf.Abs(v1 - v2);
                 
-                return (hDiff + sDiff + vDiff) / 3f < threshold;
+                // Weighted comparison: value is most important, then saturation, then hue
+                float difference = (vDiff * 0.5f + sDiff * 0.3f + hDiff * 0.2f);
+                return difference < threshold;
             }
             else
             {
+                // Standard RGB distance
                 float rDiff = Mathf.Abs(color1.r - color2.r);
                 float gDiff = Mathf.Abs(color1.g - color2.g);
                 float bDiff = Mathf.Abs(color1.b - color2.b);
                 
-                return (rDiff + gDiff + bDiff) / 3f < threshold;
+                // Use Euclidean distance for more accurate color comparison
+                float distance = Mathf.Sqrt(rDiff * rDiff + gDiff * gDiff + bDiff * bDiff) / Mathf.Sqrt(3f);
+                return distance < threshold;
             }
         }
         
