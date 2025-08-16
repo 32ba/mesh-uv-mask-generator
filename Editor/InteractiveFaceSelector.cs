@@ -15,6 +15,7 @@ namespace MeshUVMaskGenerator
         private HashSet<int> selectedFaces = new HashSet<int>();
         private Dictionary<int, List<int>> faceToTriangles = new Dictionary<int, List<int>>();
         private Dictionary<int, Vector3> faceNormals = new Dictionary<int, Vector3>();
+        private Dictionary<int, HashSet<int>> faceAdjacency = new Dictionary<int, HashSet<int>>();
         
         private bool isSelecting = false;
         private bool addToSelection = true;
@@ -150,6 +151,7 @@ namespace MeshUVMaskGenerator
         {
             faceToTriangles.Clear();
             faceNormals.Clear();
+            faceAdjacency.Clear();
             
             int[] triangles = targetMesh.triangles;
             Vector3[] vertices = targetMesh.vertices;
@@ -157,6 +159,7 @@ namespace MeshUVMaskGenerator
             
             bool hasNormals = normals != null && normals.Length > 0;
             
+            // Build face data
             for (int i = 0; i < triangles.Length; i += 3)
             {
                 int faceIndex = i / 3;
@@ -165,6 +168,7 @@ namespace MeshUVMaskGenerator
                 int idx2 = triangles[i + 2];
                 
                 faceToTriangles[faceIndex] = new List<int> { idx0, idx1, idx2 };
+                faceAdjacency[faceIndex] = new HashSet<int>();
                 
                 // Calculate face normal
                 Vector3 faceNormal;
@@ -186,6 +190,9 @@ namespace MeshUVMaskGenerator
                 
                 faceNormals[faceIndex] = faceNormal;
             }
+            
+            // Build adjacency information
+            BuildFaceAdjacency();
         }
         
         private void OnSelectionChanged()
@@ -953,6 +960,8 @@ namespace MeshUVMaskGenerator
             // Get reference face UV bounds
             var refBounds = GetFaceUVBounds(referenceFaceIndex, uvs);
             
+            // First, find all faces with similar UV ranges
+            HashSet<int> candidateFaces = new HashSet<int>();
             foreach (var kvp in faceToTriangles)
             {
                 int faceIndex = kvp.Key;
@@ -964,9 +973,12 @@ namespace MeshUVMaskGenerator
                 
                 if (centerDiff.magnitude < uvRangeThreshold && sizeDiff.magnitude < uvRangeThreshold)
                 {
-                    similarFaces.Add(faceIndex);
+                    candidateFaces.Add(faceIndex);
                 }
             }
+            
+            // Now filter to only include faces that are connected to the reference face
+            similarFaces = GetConnectedFaces(referenceFaceIndex, candidateFaces);
             
             return similarFaces;
         }
@@ -1196,6 +1208,92 @@ namespace MeshUVMaskGenerator
             }
             
             return 0;
+        }
+        
+        private void BuildFaceAdjacency()
+        {
+            // Build edge-to-face mapping for efficient adjacency lookup
+            Dictionary<(int, int), List<int>> edgeToFaces = new Dictionary<(int, int), List<int>>();
+            
+            foreach (var kvp in faceToTriangles)
+            {
+                int faceIndex = kvp.Key;
+                List<int> vertices = kvp.Value;
+                
+                // Create edges for this face
+                (int, int)[] edges = new (int, int)[]
+                {
+                    (Mathf.Min(vertices[0], vertices[1]), Mathf.Max(vertices[0], vertices[1])),
+                    (Mathf.Min(vertices[1], vertices[2]), Mathf.Max(vertices[1], vertices[2])),
+                    (Mathf.Min(vertices[2], vertices[0]), Mathf.Max(vertices[2], vertices[0]))
+                };
+                
+                foreach (var edge in edges)
+                {
+                    if (!edgeToFaces.ContainsKey(edge))
+                    {
+                        edgeToFaces[edge] = new List<int>();
+                    }
+                    edgeToFaces[edge].Add(faceIndex);
+                }
+            }
+            
+            // Build adjacency lists
+            foreach (var kvp in edgeToFaces)
+            {
+                List<int> facesOnEdge = kvp.Value;
+                
+                // Connect all faces that share this edge
+                for (int i = 0; i < facesOnEdge.Count; i++)
+                {
+                    for (int j = i + 1; j < facesOnEdge.Count; j++)
+                    {
+                        int face1 = facesOnEdge[i];
+                        int face2 = facesOnEdge[j];
+                        
+                        faceAdjacency[face1].Add(face2);
+                        faceAdjacency[face2].Add(face1);
+                    }
+                }
+            }
+        }
+        
+        private HashSet<int> GetConnectedFaces(int startFace, HashSet<int> candidateFaces)
+        {
+            HashSet<int> connectedFaces = new HashSet<int>();
+            HashSet<int> visited = new HashSet<int>();
+            Queue<int> queue = new Queue<int>();
+            
+            // Start BFS from the reference face
+            if (candidateFaces.Contains(startFace))
+            {
+                queue.Enqueue(startFace);
+                visited.Add(startFace);
+                connectedFaces.Add(startFace);
+            }
+            
+            // Breadth-first search to find all connected faces
+            while (queue.Count > 0)
+            {
+                int currentFace = queue.Dequeue();
+                
+                // Check all adjacent faces
+                if (faceAdjacency.ContainsKey(currentFace))
+                {
+                    foreach (int adjacentFace in faceAdjacency[currentFace])
+                    {
+                        // Only consider faces that are in our candidate set and not visited
+                        if (candidateFaces.Contains(adjacentFace) && !visited.Contains(adjacentFace))
+                        {
+                            visited.Add(adjacentFace);
+                            queue.Enqueue(adjacentFace);
+                            connectedFaces.Add(adjacentFace);
+                        }
+                    }
+                }
+            }
+            
+            return connectedFaces;
         }
     }
 }
