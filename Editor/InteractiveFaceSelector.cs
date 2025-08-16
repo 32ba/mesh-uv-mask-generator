@@ -30,6 +30,10 @@ namespace MeshUVMaskGenerator
         private float planarAngleThreshold = 5.0f; // Degrees
         private bool showPlanarPreview = true;
         
+        // Occlusion detection settings
+        private bool checkOcclusion = true;
+        private LayerMask occlusionLayerMask = -1; // All layers by default
+        
         private Material highlightMaterial;
         private Material wireframeMaterial;
         private Mesh highlightMesh;
@@ -224,6 +228,20 @@ namespace MeshUVMaskGenerator
             }
             
             EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Visibility Settings", EditorStyles.boldLabel);
+            checkOcclusion = EditorGUILayout.Toggle("Check Occlusion", checkOcclusion);
+            
+            if (checkOcclusion)
+            {
+                occlusionLayerMask = EditorGUILayout.MaskField("Occlusion Layers", occlusionLayerMask, 
+                    UnityEditorInternal.InternalEditorUtility.layers);
+                EditorGUILayout.HelpBox(
+                    "Only visible faces can be selected. Faces hidden behind other objects will be ignored.",
+                    MessageType.Info
+                );
+            }
+            
+            EditorGUILayout.Space();
             EditorGUILayout.LabelField("Selection Mode", EditorStyles.boldLabel);
             
             EditorGUILayout.BeginHorizontal();
@@ -394,6 +412,44 @@ namespace MeshUVMaskGenerator
             
             Vector3[] vertices = targetMesh.vertices;
             
+            // First, check if we hit anything with Unity's physics raycast
+            if (checkOcclusion)
+            {
+                RaycastHit[] hits = Physics.RaycastAll(ray, float.MaxValue, occlusionLayerMask);
+                System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+                
+                // Find our target object in the hit list
+                bool foundTarget = false;
+                float targetDistance = float.MaxValue;
+                
+                foreach (var hit in hits)
+                {
+                    if (hit.collider.gameObject == targetObject || 
+                        hit.collider.transform.IsChildOf(targetObject.transform) ||
+                        targetObject.transform.IsChildOf(hit.collider.transform))
+                    {
+                        foundTarget = true;
+                        targetDistance = hit.distance;
+                        break;
+                    }
+                }
+                
+                // If we didn't hit our target object first, it's occluded
+                if (!foundTarget && hits.Length > 0)
+                {
+                    SceneView.RepaintAll();
+                    return;
+                }
+                
+                // If something is in front of our target, don't select
+                if (hits.Length > 0 && hits[0].distance < targetDistance - 0.001f)
+                {
+                    SceneView.RepaintAll();
+                    return;
+                }
+            }
+            
+            // Now do our custom face detection
             for (int faceIndex = 0; faceIndex < faceToTriangles.Count; faceIndex++)
             {
                 List<int> triangleIndices = faceToTriangles[faceIndex];
@@ -406,6 +462,12 @@ namespace MeshUVMaskGenerator
                 {
                     if (distance < closestDistance)
                     {
+                        // Additional occlusion check for this specific face
+                        if (checkOcclusion && !IsFaceVisible(ray, v0, v1, v2, distance))
+                        {
+                            continue;
+                        }
+                        
                         closestDistance = distance;
                         hoveredFaceIndex = faceIndex;
                     }
@@ -640,6 +702,70 @@ namespace MeshUVMaskGenerator
             
             // Allow some tolerance for "nearly coplanar" faces
             return dot < Mathf.Sin(angleThreshold);
+        }
+        
+        private bool IsFaceVisible(Ray ray, Vector3 v0, Vector3 v1, Vector3 v2, float faceDistance)
+        {
+            // Calculate face center
+            Vector3 faceCenter = (v0 + v1 + v2) / 3f;
+            
+            // Cast a ray from camera to face center
+            Vector3 rayDirection = (faceCenter - ray.origin).normalized;
+            float distanceToFace = Vector3.Distance(ray.origin, faceCenter);
+            
+            // Check if anything blocks the path to this face
+            RaycastHit[] hits = Physics.RaycastAll(ray.origin, rayDirection, distanceToFace, occlusionLayerMask);
+            
+            foreach (var hit in hits)
+            {
+                // Skip if it's our target object
+                if (hit.collider.gameObject == targetObject || 
+                    hit.collider.transform.IsChildOf(targetObject.transform) ||
+                    targetObject.transform.IsChildOf(hit.collider.transform))
+                {
+                    continue;
+                }
+                
+                // If something else is hit before our face, it's occluded
+                if (hit.distance < faceDistance - 0.001f)
+                {
+                    return false;
+                }
+            }
+            
+            // Also check from multiple points on the face for better accuracy
+            Vector3[] checkPoints = new Vector3[]
+            {
+                v0,
+                v1,
+                v2,
+                (v0 + v1) * 0.5f,
+                (v1 + v2) * 0.5f,
+                (v2 + v0) * 0.5f
+            };
+            
+            int visiblePoints = 0;
+            foreach (var point in checkPoints)
+            {
+                Vector3 dirToPoint = (point - ray.origin).normalized;
+                float distToPoint = Vector3.Distance(ray.origin, point);
+                
+                RaycastHit hit;
+                if (Physics.Raycast(ray.origin, dirToPoint, out hit, distToPoint, occlusionLayerMask))
+                {
+                    // If we hit something else before reaching the point, it's occluded
+                    if (hit.collider.gameObject != targetObject && 
+                        !hit.collider.transform.IsChildOf(targetObject.transform) &&
+                        !targetObject.transform.IsChildOf(hit.collider.transform))
+                    {
+                        continue;
+                    }
+                }
+                visiblePoints++;
+            }
+            
+            // Consider the face visible if at least half of the check points are visible
+            return visiblePoints >= checkPoints.Length / 2;
         }
     }
 }
