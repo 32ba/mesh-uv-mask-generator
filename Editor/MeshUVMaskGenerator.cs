@@ -25,7 +25,8 @@ namespace MeshUVMaskGenerator
             All,
             SubMesh,
             Material,
-            VertexGroup
+            VertexGroup,
+            InteractiveFaces
         }
         private SelectionMode selectionMode = SelectionMode.All;
         private int selectedSubMesh = 0;
@@ -35,9 +36,9 @@ namespace MeshUVMaskGenerator
         private List<int> customSelectedTriangles = new List<int>();
 
         [MenuItem("Window/Mesh UV Mask Generator")]
-        public static void ShowWindow()
+        public static MeshUVMaskGeneratorWindow ShowWindow()
         {
-            GetWindow<MeshUVMaskGeneratorWindow>("UV Mask Generator");
+            return GetWindow<MeshUVMaskGeneratorWindow>("UV Mask Generator");
         }
 
         private void OnEnable()
@@ -153,6 +154,19 @@ namespace MeshUVMaskGenerator
                 case SelectionMode.VertexGroup:
                     EditorGUILayout.HelpBox("Vertex Group mode: Enter vertex indices separated by commas (e.g., 0-10,15,20-25)", MessageType.Info);
                     vertexGroupFilter = EditorGUILayout.TextField("Vertex Indices", vertexGroupFilter);
+                    break;
+                    
+                case SelectionMode.InteractiveFaces:
+                    EditorGUILayout.HelpBox($"Interactive Face Selection: {customSelectedTriangles.Count / 3} faces selected", MessageType.Info);
+                    if (GUILayout.Button("Open Face Selector"))
+                    {
+                        InteractiveFaceSelector.OpenWithTarget(selectedGameObject, this);
+                    }
+                    if (customSelectedTriangles.Count > 0 && GUILayout.Button("Clear Face Selection"))
+                    {
+                        customSelectedTriangles.Clear();
+                        Repaint();
+                    }
                     break;
             }
             
@@ -460,6 +474,9 @@ namespace MeshUVMaskGenerator
                 case SelectionMode.VertexGroup:
                     return GetVertexGroupTriangles();
                     
+                case SelectionMode.InteractiveFaces:
+                    return customSelectedTriangles.Count > 0 ? customSelectedTriangles.ToArray() : mesh.triangles;
+                    
                 default:
                     return mesh.triangles;
             }
@@ -535,6 +552,13 @@ namespace MeshUVMaskGenerator
             }
             
             return indices;
+        }
+        
+        public void SetCustomSelectedFaces(List<int> triangles)
+        {
+            customSelectedTriangles = triangles;
+            selectionMode = SelectionMode.InteractiveFaces;
+            Repaint();
         }
 
         private void SaveTexture()
