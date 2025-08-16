@@ -50,6 +50,10 @@ namespace MeshUVMaskGenerator
         private bool checkOcclusion = true;
         private LayerMask occlusionLayerMask = -1; // All layers by default
         
+        // Texture read/write management
+        private Dictionary<Texture2D, bool> originalReadWriteSettings = new Dictionary<Texture2D, bool>();
+        private HashSet<Texture2D> modifiedTextures = new HashSet<Texture2D>();
+        
         private Material highlightMaterial;
         private Material wireframeMaterial;
         private Mesh highlightMesh;
@@ -90,6 +94,9 @@ namespace MeshUVMaskGenerator
         {
             SceneView.duringSceneGui -= OnSceneGUI;
             Selection.selectionChanged -= OnSelectionChanged;
+            
+            // Restore original texture settings
+            RestoreTextureSettings();
             
             if (highlightMaterial != null)
                 DestroyImmediate(highlightMaterial);
@@ -906,10 +913,10 @@ namespace MeshUVMaskGenerator
                 return similarFaces;
             }
             
-            // Check if texture is readable
-            if (!texture.isReadable)
+            // Ensure texture is readable (temporarily enable if needed)
+            if (!EnsureTextureReadable(texture))
             {
-                Debug.LogError($"[UV Mask Generator] Texture '{texture.name}' is not readable. Please enable 'Read/Write Enabled' in texture import settings.");
+                Debug.LogError($"[UV Mask Generator] Failed to make texture '{texture.name}' readable.");
                 return similarFaces;
             }
                 
@@ -1294,6 +1301,104 @@ namespace MeshUVMaskGenerator
             }
             
             return connectedFaces;
+        }
+        
+        private bool EnsureTextureReadable(Texture2D texture)
+        {
+            if (texture.isReadable)
+                return true;
+                
+            string assetPath = UnityEditor.AssetDatabase.GetAssetPath(texture);
+            if (string.IsNullOrEmpty(assetPath))
+            {
+                Debug.LogWarning($"[UV Mask Generator] Cannot find asset path for texture '{texture.name}'");
+                return false;
+            }
+            
+            UnityEditor.TextureImporter textureImporter = UnityEditor.AssetImporter.GetAtPath(assetPath) as UnityEditor.TextureImporter;
+            if (textureImporter == null)
+            {
+                Debug.LogWarning($"[UV Mask Generator] Cannot get TextureImporter for '{assetPath}'");
+                return false;
+            }
+            
+            // Store original setting if not already stored
+            if (!originalReadWriteSettings.ContainsKey(texture))
+            {
+                originalReadWriteSettings[texture] = textureImporter.isReadable;
+                Debug.Log($"[UV Mask Generator] Stored original Read/Write setting for '{texture.name}': {textureImporter.isReadable}");
+            }
+            
+            // Enable read/write if it's not enabled
+            if (!textureImporter.isReadable)
+            {
+                textureImporter.isReadable = true;
+                modifiedTextures.Add(texture);
+                
+                try
+                {
+                    UnityEditor.AssetDatabase.ImportAsset(assetPath, UnityEditor.ImportAssetOptions.ForceUpdate);
+                    Debug.Log($"[UV Mask Generator] Temporarily enabled Read/Write for texture '{texture.name}'");
+                    return true;
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogError($"[UV Mask Generator] Failed to reimport texture '{texture.name}': {e.Message}");
+                    return false;
+                }
+            }
+            
+            return true;
+        }
+        
+        private void RestoreTextureSettings()
+        {
+            if (originalReadWriteSettings.Count == 0)
+                return;
+                
+            Debug.Log($"[UV Mask Generator] Restoring texture settings for {originalReadWriteSettings.Count} textures");
+            
+            foreach (var kvp in originalReadWriteSettings)
+            {
+                Texture2D texture = kvp.Key;
+                bool originalSetting = kvp.Value;
+                
+                if (texture == null || !modifiedTextures.Contains(texture))
+                    continue;
+                    
+                string assetPath = UnityEditor.AssetDatabase.GetAssetPath(texture);
+                if (string.IsNullOrEmpty(assetPath))
+                    continue;
+                    
+                UnityEditor.TextureImporter textureImporter = UnityEditor.AssetImporter.GetAtPath(assetPath) as UnityEditor.TextureImporter;
+                if (textureImporter == null)
+                    continue;
+                    
+                // Only restore if we actually changed it and the original was false
+                if (!originalSetting && textureImporter.isReadable)
+                {
+                    textureImporter.isReadable = originalSetting;
+                    
+                    try
+                    {
+                        UnityEditor.AssetDatabase.ImportAsset(assetPath, UnityEditor.ImportAssetOptions.ForceUpdate);
+                        Debug.Log($"[UV Mask Generator] Restored Read/Write setting for texture '{texture.name}' to {originalSetting}");
+                    }
+                    catch (System.Exception e)
+                    {
+                        Debug.LogError($"[UV Mask Generator] Failed to restore texture '{texture.name}': {e.Message}");
+                    }
+                }
+            }
+            
+            // Clear tracking data
+            originalReadWriteSettings.Clear();
+            modifiedTextures.Clear();
+        }
+        
+        public void ManualCleanup()
+        {
+            RestoreTextureSettings();
         }
     }
 }

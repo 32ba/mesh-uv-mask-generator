@@ -68,6 +68,16 @@ namespace MeshUVMaskGenerator
             {
                 DestroyImmediate(previewTexture);
             }
+            
+            // Cleanup any open face selector windows
+            var faceSelectorWindows = Resources.FindObjectsOfTypeAll<InteractiveFaceSelector>();
+            foreach (var window in faceSelectorWindows)
+            {
+                if (window != null)
+                {
+                    window.ManualCleanup();
+                }
+            }
         }
 
         private void OnSelectionChanged()
