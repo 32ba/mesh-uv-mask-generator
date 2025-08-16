@@ -15,9 +15,24 @@ namespace MeshUVMaskGenerator
         private Color backgroundColor = Color.black;
         private Color maskColor = Color.white;
         private float lineThickness = 1.0f;
-        private bool fillPolygons = false;
+        private bool fillPolygons = true;
         private Texture2D previewTexture;
         private Vector2 scrollPosition;
+        
+        // Selection options
+        private enum SelectionMode
+        {
+            All,
+            SubMesh,
+            Material,
+            VertexGroup
+        }
+        private SelectionMode selectionMode = SelectionMode.All;
+        private int selectedSubMesh = 0;
+        private int selectedMaterial = 0;
+        private bool[] selectedVertexGroups;
+        private string vertexGroupFilter = "";
+        private List<int> customSelectedTriangles = new List<int>();
 
         [MenuItem("Window/Mesh UV Mask Generator")]
         public static void ShowWindow()
@@ -91,6 +106,56 @@ namespace MeshUVMaskGenerator
                 return;
             }
 
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Selection Settings", EditorStyles.boldLabel);
+            
+            selectionMode = (SelectionMode)EditorGUILayout.EnumPopup("Selection Mode", selectionMode);
+            
+            switch (selectionMode)
+            {
+                case SelectionMode.SubMesh:
+                    if (mesh.subMeshCount > 1)
+                    {
+                        string[] subMeshOptions = new string[mesh.subMeshCount];
+                        for (int i = 0; i < mesh.subMeshCount; i++)
+                        {
+                            subMeshOptions[i] = $"SubMesh {i}";
+                        }
+                        selectedSubMesh = EditorGUILayout.Popup("SubMesh", selectedSubMesh, subMeshOptions);
+                    }
+                    else
+                    {
+                        EditorGUILayout.HelpBox("This mesh has only one submesh.", MessageType.Info);
+                    }
+                    break;
+                    
+                case SelectionMode.Material:
+                    MeshRenderer meshRenderer = selectedGameObject?.GetComponent<MeshRenderer>();
+                    SkinnedMeshRenderer skinnedRenderer = selectedGameObject?.GetComponent<SkinnedMeshRenderer>();
+                    Material[] materials = meshRenderer != null ? meshRenderer.sharedMaterials : 
+                                         skinnedRenderer != null ? skinnedRenderer.sharedMaterials : null;
+                    
+                    if (materials != null && materials.Length > 0)
+                    {
+                        string[] materialOptions = new string[materials.Length];
+                        for (int i = 0; i < materials.Length; i++)
+                        {
+                            materialOptions[i] = materials[i] != null ? materials[i].name : $"Material {i}";
+                        }
+                        selectedMaterial = EditorGUILayout.Popup("Material", selectedMaterial, materialOptions);
+                    }
+                    else
+                    {
+                        EditorGUILayout.HelpBox("No materials found on this object.", MessageType.Warning);
+                    }
+                    break;
+                    
+                case SelectionMode.VertexGroup:
+                    EditorGUILayout.HelpBox("Vertex Group mode: Enter vertex indices separated by commas (e.g., 0-10,15,20-25)", MessageType.Info);
+                    vertexGroupFilter = EditorGUILayout.TextField("Vertex Indices", vertexGroupFilter);
+                    break;
+            }
+            
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("UV Settings", EditorStyles.boldLabel);
             
@@ -211,7 +276,7 @@ namespace MeshUVMaskGenerator
             }
 
             Vector2[] uvs = GetUVs(mesh, uvChannel);
-            int[] triangles = mesh.triangles;
+            int[] triangles = GetSelectedTriangles();
 
             if (uvs == null || uvs.Length == 0)
             {
@@ -353,6 +418,123 @@ namespace MeshUVMaskGenerator
             float area2 = 0.5f * Mathf.Abs((x1 - x0) * (py - y0) - (px - x0) * (y1 - y0));
 
             return Mathf.Abs(area - (area0 + area1 + area2)) < 0.01f;
+        }
+        
+        private int[] GetSelectedTriangles()
+        {
+            switch (selectionMode)
+            {
+                case SelectionMode.All:
+                    return mesh.triangles;
+                    
+                case SelectionMode.SubMesh:
+                    if (selectedSubMesh < mesh.subMeshCount)
+                    {
+                        var subMesh = mesh.GetSubMesh(selectedSubMesh);
+                        int[] subMeshTriangles = new int[subMesh.indexCount];
+                        int baseIndex = subMesh.indexStart;
+                        
+                        for (int i = 0; i < subMesh.indexCount; i++)
+                        {
+                            subMeshTriangles[i] = mesh.triangles[baseIndex + i];
+                        }
+                        return subMeshTriangles;
+                    }
+                    return mesh.triangles;
+                    
+                case SelectionMode.Material:
+                    if (selectedMaterial < mesh.subMeshCount)
+                    {
+                        var subMesh = mesh.GetSubMesh(selectedMaterial);
+                        int[] materialTriangles = new int[subMesh.indexCount];
+                        int baseIndex = subMesh.indexStart;
+                        
+                        for (int i = 0; i < subMesh.indexCount; i++)
+                        {
+                            materialTriangles[i] = mesh.triangles[baseIndex + i];
+                        }
+                        return materialTriangles;
+                    }
+                    return mesh.triangles;
+                    
+                case SelectionMode.VertexGroup:
+                    return GetVertexGroupTriangles();
+                    
+                default:
+                    return mesh.triangles;
+            }
+        }
+        
+        private int[] GetVertexGroupTriangles()
+        {
+            if (string.IsNullOrEmpty(vertexGroupFilter))
+                return mesh.triangles;
+                
+            HashSet<int> selectedVertices = ParseVertexIndices(vertexGroupFilter);
+            if (selectedVertices.Count == 0)
+                return new int[0];
+                
+            List<int> selectedTriangles = new List<int>();
+            int[] allTriangles = mesh.triangles;
+            
+            for (int i = 0; i < allTriangles.Length; i += 3)
+            {
+                int v0 = allTriangles[i];
+                int v1 = allTriangles[i + 1];
+                int v2 = allTriangles[i + 2];
+                
+                // Include triangle if any vertex is in the selected group
+                if (selectedVertices.Contains(v0) || 
+                    selectedVertices.Contains(v1) || 
+                    selectedVertices.Contains(v2))
+                {
+                    selectedTriangles.Add(v0);
+                    selectedTriangles.Add(v1);
+                    selectedTriangles.Add(v2);
+                }
+            }
+            
+            return selectedTriangles.ToArray();
+        }
+        
+        private HashSet<int> ParseVertexIndices(string input)
+        {
+            HashSet<int> indices = new HashSet<int>();
+            
+            if (string.IsNullOrEmpty(input))
+                return indices;
+                
+            string[] parts = input.Split(',');
+            
+            foreach (string part in parts)
+            {
+                string trimmed = part.Trim();
+                
+                if (trimmed.Contains("-"))
+                {
+                    // Range (e.g., "0-10")
+                    string[] range = trimmed.Split('-');
+                    if (range.Length == 2 && 
+                        int.TryParse(range[0].Trim(), out int start) && 
+                        int.TryParse(range[1].Trim(), out int end))
+                    {
+                        for (int i = start; i <= end && i < mesh.vertexCount; i++)
+                        {
+                            indices.Add(i);
+                        }
+                    }
+                }
+                else
+                {
+                    // Single index
+                    if (int.TryParse(trimmed, out int index) && index < mesh.vertexCount)
+                    {
+                        indices.Add(index);
+                    }
+                }
+            }
+            
+            return indices;
         }
 
         private void SaveTexture()
