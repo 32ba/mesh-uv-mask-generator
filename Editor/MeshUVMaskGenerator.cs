@@ -34,6 +34,20 @@ namespace MeshUVMaskGenerator
         private bool[] selectedVertexGroups;
         private string vertexGroupFilter = "";
         private List<int> customSelectedTriangles = new List<int>();
+        
+        // Cache for parameter changes detection
+        private int lastUVChannel = -1;
+        private int lastTextureSize = -1;
+        private Color lastBackgroundColor;
+        private Color lastMaskColor;
+        private bool lastFillPolygons;
+        private float lastLineThickness;
+        private SelectionMode lastSelectionMode;
+        private int lastSelectedSubMesh = -1;
+        private int lastSelectedMaterial = -1;
+        private string lastVertexGroupFilter = "";
+        private int lastCustomSelectedTrianglesCount = -1;
+        private Mesh lastMesh;
 
         [MenuItem("Window/Mesh UV Mask Generator")]
         public static MeshUVMaskGeneratorWindow ShowWindow()
@@ -84,6 +98,7 @@ namespace MeshUVMaskGenerator
                 mesh = null;
             }
             
+            UpdatePreviewIfNeeded();
             Repaint();
         }
 
@@ -110,7 +125,12 @@ namespace MeshUVMaskGenerator
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Selection Settings", EditorStyles.boldLabel);
             
+            EditorGUI.BeginChangeCheck();
             selectionMode = (SelectionMode)EditorGUILayout.EnumPopup("Selection Mode", selectionMode);
+            if (EditorGUI.EndChangeCheck())
+            {
+                UpdatePreviewIfNeeded();
+            }
             
             switch (selectionMode)
             {
@@ -123,6 +143,10 @@ namespace MeshUVMaskGenerator
                             subMeshOptions[i] = $"SubMesh {i}";
                         }
                         selectedSubMesh = EditorGUILayout.Popup("SubMesh", selectedSubMesh, subMeshOptions);
+                        if (selectedSubMesh != lastSelectedSubMesh)
+                        {
+                            UpdatePreviewIfNeeded();
+                        }
                     }
                     else
                     {
@@ -144,6 +168,10 @@ namespace MeshUVMaskGenerator
                             materialOptions[i] = materials[i] != null ? materials[i].name : $"Material {i}";
                         }
                         selectedMaterial = EditorGUILayout.Popup("Material", selectedMaterial, materialOptions);
+                        if (selectedMaterial != lastSelectedMaterial)
+                        {
+                            UpdatePreviewIfNeeded();
+                        }
                     }
                     else
                     {
@@ -154,6 +182,10 @@ namespace MeshUVMaskGenerator
                 case SelectionMode.VertexGroup:
                     EditorGUILayout.HelpBox("Vertex Group mode: Enter vertex indices separated by commas (e.g., 0-10,15,20-25)", MessageType.Info);
                     vertexGroupFilter = EditorGUILayout.TextField("Vertex Indices", vertexGroupFilter);
+                    if (vertexGroupFilter != lastVertexGroupFilter)
+                    {
+                        UpdatePreviewIfNeeded();
+                    }
                     break;
                     
                 case SelectionMode.InteractiveFaces:
@@ -165,6 +197,7 @@ namespace MeshUVMaskGenerator
                     if (customSelectedTriangles.Count > 0 && GUILayout.Button("Clear Face Selection"))
                     {
                         customSelectedTriangles.Clear();
+                        UpdatePreviewIfNeeded();
                         Repaint();
                     }
                     break;
@@ -181,7 +214,12 @@ namespace MeshUVMaskGenerator
                 {
                     uvChannelOptions[i] = $"UV{i}";
                 }
+                EditorGUI.BeginChangeCheck();
                 uvChannel = EditorGUILayout.Popup("UV Channel", uvChannel, uvChannelOptions);
+                if (EditorGUI.EndChangeCheck())
+                {
+                    UpdatePreviewIfNeeded();
+                }
             }
             else
             {
@@ -193,29 +231,40 @@ namespace MeshUVMaskGenerator
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Texture Settings", EditorStyles.boldLabel);
             
+            EditorGUI.BeginChangeCheck();
             textureSize = EditorGUILayout.IntPopup("Texture Size", textureSize, 
                 new string[] { "256", "512", "1024", "2048", "4096" }, 
                 new int[] { 256, 512, 1024, 2048, 4096 });
             
             backgroundColor = EditorGUILayout.ColorField("Background Color", backgroundColor);
             maskColor = EditorGUILayout.ColorField("Mask Color", maskColor);
+            if (EditorGUI.EndChangeCheck())
+            {
+                UpdatePreviewIfNeeded();
+            }
             
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Render Settings", EditorStyles.boldLabel);
             
+            EditorGUI.BeginChangeCheck();
             fillPolygons = EditorGUILayout.Toggle("Fill Polygons", fillPolygons);
             
             if (!fillPolygons)
             {
                 lineThickness = EditorGUILayout.Slider("Line Thickness", lineThickness, 0.5f, 5.0f);
             }
+            if (EditorGUI.EndChangeCheck())
+            {
+                UpdatePreviewIfNeeded();
+            }
 
-            EditorGUILayout.Space();
-
-            if (GUILayout.Button("Generate UV Mask", GUILayout.Height(30)))
+            // Auto-generate preview on first display
+            if (mesh != null && previewTexture == null)
             {
                 GenerateUVMask();
             }
+
+            EditorGUILayout.Space();
 
             if (previewTexture != null)
             {
@@ -558,7 +607,51 @@ namespace MeshUVMaskGenerator
         {
             customSelectedTriangles = triangles;
             selectionMode = SelectionMode.InteractiveFaces;
+            UpdatePreviewIfNeeded();
             Repaint();
+        }
+        
+        private void UpdatePreviewIfNeeded()
+        {
+            if (mesh == null) return;
+            
+            bool needsUpdate = false;
+            
+            // Check if any parameters have changed
+            if (mesh != lastMesh ||
+                uvChannel != lastUVChannel ||
+                textureSize != lastTextureSize ||
+                backgroundColor != lastBackgroundColor ||
+                maskColor != lastMaskColor ||
+                fillPolygons != lastFillPolygons ||
+                (!fillPolygons && Mathf.Abs(lineThickness - lastLineThickness) > 0.01f) ||
+                selectionMode != lastSelectionMode ||
+                (selectionMode == SelectionMode.SubMesh && selectedSubMesh != lastSelectedSubMesh) ||
+                (selectionMode == SelectionMode.Material && selectedMaterial != lastSelectedMaterial) ||
+                (selectionMode == SelectionMode.VertexGroup && vertexGroupFilter != lastVertexGroupFilter) ||
+                (selectionMode == SelectionMode.InteractiveFaces && customSelectedTriangles.Count != lastCustomSelectedTrianglesCount))
+            {
+                needsUpdate = true;
+            }
+            
+            if (needsUpdate)
+            {
+                GenerateUVMask();
+                
+                // Update cached values
+                lastMesh = mesh;
+                lastUVChannel = uvChannel;
+                lastTextureSize = textureSize;
+                lastBackgroundColor = backgroundColor;
+                lastMaskColor = maskColor;
+                lastFillPolygons = fillPolygons;
+                lastLineThickness = lineThickness;
+                lastSelectionMode = selectionMode;
+                lastSelectedSubMesh = selectedSubMesh;
+                lastSelectedMaterial = selectedMaterial;
+                lastVertexGroupFilter = vertexGroupFilter;
+                lastCustomSelectedTrianglesCount = customSelectedTriangles.Count;
+            }
         }
 
         private void SaveTexture()
