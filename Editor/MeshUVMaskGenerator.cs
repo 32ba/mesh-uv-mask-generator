@@ -12,8 +12,8 @@ namespace MeshUVMaskGenerator
         private Mesh mesh;
         private int uvChannel = 0;
         private int textureSize = 1024;
-        private Color backgroundColor = Color.black;
-        private Color maskColor = Color.white;
+        private Color backgroundColor = Color.white;
+        private Color maskColor = Color.black;
         private float lineThickness = 1.0f;
         private bool fillPolygons = true;
         private Texture2D previewTexture;
