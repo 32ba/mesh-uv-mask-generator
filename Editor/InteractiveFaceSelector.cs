@@ -14,10 +14,21 @@ namespace MeshUVMaskGenerator
         
         private HashSet<int> selectedFaces = new HashSet<int>();
         private Dictionary<int, List<int>> faceToTriangles = new Dictionary<int, List<int>>();
+        private Dictionary<int, Vector3> faceNormals = new Dictionary<int, Vector3>();
         
         private bool isSelecting = false;
         private bool addToSelection = true;
         private Vector2 scrollPosition;
+        
+        // Planar selection mode
+        private enum SelectionBehavior
+        {
+            SingleFace,
+            PlanarFaces
+        }
+        private SelectionBehavior selectionBehavior = SelectionBehavior.PlanarFaces;
+        private float planarAngleThreshold = 5.0f; // Degrees
+        private bool showPlanarPreview = true;
         
         private Material highlightMaterial;
         private Material wireframeMaterial;
@@ -119,12 +130,42 @@ namespace MeshUVMaskGenerator
         private void BuildFaceMapping()
         {
             faceToTriangles.Clear();
+            faceNormals.Clear();
+            
             int[] triangles = targetMesh.triangles;
+            Vector3[] vertices = targetMesh.vertices;
+            Vector3[] normals = targetMesh.normals;
+            
+            bool hasNormals = normals != null && normals.Length > 0;
             
             for (int i = 0; i < triangles.Length; i += 3)
             {
                 int faceIndex = i / 3;
-                faceToTriangles[faceIndex] = new List<int> { triangles[i], triangles[i + 1], triangles[i + 2] };
+                int idx0 = triangles[i];
+                int idx1 = triangles[i + 1];
+                int idx2 = triangles[i + 2];
+                
+                faceToTriangles[faceIndex] = new List<int> { idx0, idx1, idx2 };
+                
+                // Calculate face normal
+                Vector3 faceNormal;
+                if (hasNormals)
+                {
+                    // Average vertex normals
+                    faceNormal = (normals[idx0] + normals[idx1] + normals[idx2]).normalized;
+                }
+                else
+                {
+                    // Calculate from triangle vertices
+                    Vector3 v0 = vertices[idx0];
+                    Vector3 v1 = vertices[idx1];
+                    Vector3 v2 = vertices[idx2];
+                    Vector3 edge1 = v1 - v0;
+                    Vector3 edge2 = v2 - v0;
+                    faceNormal = Vector3.Cross(edge1, edge2).normalized;
+                }
+                
+                faceNormals[faceIndex] = faceNormal;
             }
         }
         
@@ -164,6 +205,23 @@ namespace MeshUVMaskGenerator
             EditorGUILayout.LabelField("Selection Colors", EditorStyles.boldLabel);
             selectedFaceColor = EditorGUILayout.ColorField("Selected Face Color", selectedFaceColor);
             hoverFaceColor = EditorGUILayout.ColorField("Hover Face Color", hoverFaceColor);
+            
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Selection Behavior", EditorStyles.boldLabel);
+            
+            selectionBehavior = (SelectionBehavior)EditorGUILayout.EnumPopup("Click Behavior", selectionBehavior);
+            
+            if (selectionBehavior == SelectionBehavior.PlanarFaces)
+            {
+                planarAngleThreshold = EditorGUILayout.Slider("Angle Threshold (degrees)", planarAngleThreshold, 0.1f, 45.0f);
+                showPlanarPreview = EditorGUILayout.Toggle("Show Planar Preview", showPlanarPreview);
+                EditorGUILayout.HelpBox(
+                    "Click on a face to select all coplanar faces within the angle threshold.\n" +
+                    "Lower values = stricter planar detection\n" +
+                    "Higher values = more permissive selection",
+                    MessageType.Info
+                );
+            }
             
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Selection Mode", EditorStyles.boldLabel);
@@ -281,14 +339,30 @@ namespace MeshUVMaskGenerator
                                 shouldAdd = false;
                             else if (e.alt)
                                 shouldAdd = !addToSelection;
-                                
-                            if (shouldAdd)
+                            
+                            HashSet<int> facesToSelect = new HashSet<int>();
+                            
+                            if (selectionBehavior == SelectionBehavior.PlanarFaces)
                             {
-                                selectedFaces.Add(hoveredFaceIndex);
+                                // Select all coplanar faces
+                                facesToSelect = GetCoplanarFaces(hoveredFaceIndex);
                             }
                             else
                             {
-                                selectedFaces.Remove(hoveredFaceIndex);
+                                // Select single face
+                                facesToSelect.Add(hoveredFaceIndex);
+                            }
+                            
+                            foreach (int faceIndex in facesToSelect)
+                            {
+                                if (shouldAdd)
+                                {
+                                    selectedFaces.Add(faceIndex);
+                                }
+                                else
+                                {
+                                    selectedFaces.Remove(faceIndex);
+                                }
                             }
                             
                             e.Use();
@@ -395,7 +469,22 @@ namespace MeshUVMaskGenerator
                 }
             }
             
-            if (hoveredFaceIndex >= 0 && !selectedFaces.Contains(hoveredFaceIndex))
+            // Draw planar preview if enabled
+            if (showPlanarPreview && selectionBehavior == SelectionBehavior.PlanarFaces && 
+                hoveredFaceIndex >= 0 && !selectedFaces.Contains(hoveredFaceIndex))
+            {
+                HashSet<int> coplanarFaces = GetCoplanarFaces(hoveredFaceIndex);
+                Color previewColor = new Color(hoverFaceColor.r, hoverFaceColor.g, hoverFaceColor.b, hoverFaceColor.a * 0.5f);
+                
+                foreach (int faceIndex in coplanarFaces)
+                {
+                    if (!selectedFaces.Contains(faceIndex))
+                    {
+                        DrawFace(faceIndex, previewColor, matrix, vertices);
+                    }
+                }
+            }
+            else if (hoveredFaceIndex >= 0 && !selectedFaces.Contains(hoveredFaceIndex))
             {
                 DrawFace(hoveredFaceIndex, hoverFaceColor, matrix, vertices);
             }
@@ -490,6 +579,67 @@ namespace MeshUVMaskGenerator
             }
             
             return triangles;
+        }
+        
+        private HashSet<int> GetCoplanarFaces(int referenceFaceIndex)
+        {
+            HashSet<int> coplanarFaces = new HashSet<int>();
+            
+            if (!faceNormals.ContainsKey(referenceFaceIndex))
+                return coplanarFaces;
+                
+            Vector3 referenceNormal = faceNormals[referenceFaceIndex];
+            float angleThresholdRadians = planarAngleThreshold * Mathf.Deg2Rad;
+            float dotThreshold = Mathf.Cos(angleThresholdRadians);
+            
+            // Find all faces with similar normals
+            foreach (var kvp in faceNormals)
+            {
+                int faceIndex = kvp.Key;
+                Vector3 faceNormal = kvp.Value;
+                
+                float dot = Vector3.Dot(referenceNormal, faceNormal);
+                
+                // Check if normals are similar (accounting for both same and opposite directions)
+                if (dot >= dotThreshold || dot <= -dotThreshold)
+                {
+                    // Additional check: verify if faces are actually on the same plane
+                    if (AreFacesCoplanar(referenceFaceIndex, faceIndex, angleThresholdRadians))
+                    {
+                        coplanarFaces.Add(faceIndex);
+                    }
+                }
+            }
+            
+            return coplanarFaces;
+        }
+        
+        private bool AreFacesCoplanar(int face1Index, int face2Index, float angleThreshold)
+        {
+            if (!faceToTriangles.ContainsKey(face1Index) || !faceToTriangles.ContainsKey(face2Index))
+                return false;
+                
+            Vector3[] vertices = targetMesh.vertices;
+            
+            // Get a point from each face
+            List<int> face1Indices = faceToTriangles[face1Index];
+            List<int> face2Indices = faceToTriangles[face2Index];
+            
+            Vector3 point1 = vertices[face1Indices[0]];
+            Vector3 point2 = vertices[face2Indices[0]];
+            
+            // Get the normal of face1
+            Vector3 normal1 = faceNormals[face1Index];
+            
+            // Calculate the vector from face1 to face2
+            Vector3 vectorBetweenFaces = (point2 - point1).normalized;
+            
+            // If the vector between faces is perpendicular to the normal,
+            // the faces are coplanar
+            float dot = Mathf.Abs(Vector3.Dot(normal1, vectorBetweenFaces));
+            
+            // Allow some tolerance for "nearly coplanar" faces
+            return dot < Mathf.Sin(angleThreshold);
         }
     }
 }
