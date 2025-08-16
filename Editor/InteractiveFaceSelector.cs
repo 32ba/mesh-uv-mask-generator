@@ -128,6 +128,12 @@ namespace MeshUVMaskGenerator
         
         private void SetTarget(GameObject target)
         {
+            // Clean up textures from previous target before switching
+            if (targetObject != target)
+            {
+                RestoreTextureSettings();
+            }
+            
             targetObject = target;
             meshFilter = target.GetComponent<MeshFilter>();
             skinnedMeshRenderer = target.GetComponent<SkinnedMeshRenderer>();
@@ -207,6 +213,17 @@ namespace MeshUVMaskGenerator
             if (Selection.activeGameObject != null)
             {
                 SetTarget(Selection.activeGameObject);
+            }
+            else
+            {
+                // If no object is selected, clean up current textures
+                if (targetObject != null)
+                {
+                    RestoreTextureSettings();
+                    targetObject = null;
+                    targetMesh = null;
+                    Repaint();
+                }
             }
         }
         
@@ -1358,6 +1375,8 @@ namespace MeshUVMaskGenerator
                 
             Debug.Log($"[UV Mask Generator] Restoring texture settings for {originalReadWriteSettings.Count} textures");
             
+            List<string> pathsToReimport = new List<string>();
+            
             foreach (var kvp in originalReadWriteSettings)
             {
                 Texture2D texture = kvp.Key;
@@ -1378,16 +1397,26 @@ namespace MeshUVMaskGenerator
                 if (!originalSetting && textureImporter.isReadable)
                 {
                     textureImporter.isReadable = originalSetting;
-                    
-                    try
+                    pathsToReimport.Add(assetPath);
+                    Debug.Log($"[UV Mask Generator] Queued texture '{texture.name}' for restoration to {originalSetting}");
+                }
+            }
+            
+            // Batch reimport for better performance
+            if (pathsToReimport.Count > 0)
+            {
+                try
+                {
+                    UnityEditor.AssetDatabase.Refresh();
+                    foreach (string path in pathsToReimport)
                     {
-                        UnityEditor.AssetDatabase.ImportAsset(assetPath, UnityEditor.ImportAssetOptions.ForceUpdate);
-                        Debug.Log($"[UV Mask Generator] Restored Read/Write setting for texture '{texture.name}' to {originalSetting}");
+                        UnityEditor.AssetDatabase.ImportAsset(path, UnityEditor.ImportAssetOptions.ForceUpdate);
                     }
-                    catch (System.Exception e)
-                    {
-                        Debug.LogError($"[UV Mask Generator] Failed to restore texture '{texture.name}': {e.Message}");
-                    }
+                    Debug.Log($"[UV Mask Generator] Successfully restored {pathsToReimport.Count} texture settings");
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogError($"[UV Mask Generator] Failed to restore some textures: {e.Message}");
                 }
             }
             
