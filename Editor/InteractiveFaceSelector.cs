@@ -24,11 +24,26 @@ namespace MeshUVMaskGenerator
         private enum SelectionBehavior
         {
             SingleFace,
-            PlanarFaces
+            PlanarFaces,
+            SimilarUV
         }
         private SelectionBehavior selectionBehavior = SelectionBehavior.PlanarFaces;
         private float planarAngleThreshold = 5.0f; // Degrees
         private bool showPlanarPreview = true;
+        
+        // Similar UV selection settings
+        private enum SimilarityMode
+        {
+            TextureColor,
+            UVRange,
+            UVDensity,
+            MaterialSame
+        }
+        private SimilarityMode similarityMode = SimilarityMode.TextureColor;
+        private float colorThreshold = 0.1f; // Color similarity threshold (0-1)
+        private float uvRangeThreshold = 0.1f; // UV coordinate range threshold
+        private float densityThreshold = 0.2f; // UV density similarity threshold
+        private bool useHSVComparison = true; // Use HSV instead of RGB for color comparison
         
         // Occlusion detection settings
         private bool checkOcclusion = true;
@@ -226,6 +241,50 @@ namespace MeshUVMaskGenerator
                     MessageType.Info
                 );
             }
+            else if (selectionBehavior == SelectionBehavior.SimilarUV)
+            {
+                similarityMode = (SimilarityMode)EditorGUILayout.EnumPopup("Similarity Mode", similarityMode);
+                
+                switch (similarityMode)
+                {
+                    case SimilarityMode.TextureColor:
+                        colorThreshold = EditorGUILayout.Slider("Color Threshold", colorThreshold, 0.01f, 1.0f);
+                        useHSVComparison = EditorGUILayout.Toggle("Use HSV Comparison", useHSVComparison);
+                        EditorGUILayout.HelpBox(
+                            "Select faces with similar texture colors.\n" +
+                            "Lower threshold = more exact color match\n" +
+                            "HSV comparison is more perceptually accurate",
+                            MessageType.Info
+                        );
+                        break;
+                        
+                    case SimilarityMode.UVRange:
+                        uvRangeThreshold = EditorGUILayout.Slider("UV Range Threshold", uvRangeThreshold, 0.01f, 0.5f);
+                        EditorGUILayout.HelpBox(
+                            "Select faces using similar UV coordinate ranges.\n" +
+                            "Useful for selecting faces from the same texture atlas region",
+                            MessageType.Info
+                        );
+                        break;
+                        
+                    case SimilarityMode.UVDensity:
+                        densityThreshold = EditorGUILayout.Slider("Density Threshold", densityThreshold, 0.01f, 1.0f);
+                        EditorGUILayout.HelpBox(
+                            "Select faces with similar UV density (texel density).\n" +
+                            "Finds faces with similar texture scale/resolution",
+                            MessageType.Info
+                        );
+                        break;
+                        
+                    case SimilarityMode.MaterialSame:
+                        EditorGUILayout.HelpBox(
+                            "Select all faces using the same material.\n" +
+                            "Perfect for selecting all faces with identical shading",
+                            MessageType.Info
+                        );
+                        break;
+                }
+            }
             
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Visibility Settings", EditorStyles.boldLabel);
@@ -364,6 +423,11 @@ namespace MeshUVMaskGenerator
                             {
                                 // Select all coplanar faces
                                 facesToSelect = GetCoplanarFaces(hoveredFaceIndex);
+                            }
+                            else if (selectionBehavior == SelectionBehavior.SimilarUV)
+                            {
+                                // Select all similar UV faces
+                                facesToSelect = GetSimilarUVFaces(hoveredFaceIndex);
                             }
                             else
                             {
@@ -531,24 +595,34 @@ namespace MeshUVMaskGenerator
                 }
             }
             
-            // Draw planar preview if enabled
-            if (showPlanarPreview && selectionBehavior == SelectionBehavior.PlanarFaces && 
-                hoveredFaceIndex >= 0 && !selectedFaces.Contains(hoveredFaceIndex))
+            // Draw preview if enabled
+            if (hoveredFaceIndex >= 0 && !selectedFaces.Contains(hoveredFaceIndex))
             {
-                HashSet<int> coplanarFaces = GetCoplanarFaces(hoveredFaceIndex);
-                Color previewColor = new Color(hoverFaceColor.r, hoverFaceColor.g, hoverFaceColor.b, hoverFaceColor.a * 0.5f);
+                HashSet<int> previewFaces = new HashSet<int>();
+                Color previewColor = hoverFaceColor;
                 
-                foreach (int faceIndex in coplanarFaces)
+                if (showPlanarPreview && selectionBehavior == SelectionBehavior.PlanarFaces)
+                {
+                    previewFaces = GetCoplanarFaces(hoveredFaceIndex);
+                    previewColor = new Color(hoverFaceColor.r, hoverFaceColor.g, hoverFaceColor.b, hoverFaceColor.a * 0.5f);
+                }
+                else if (selectionBehavior == SelectionBehavior.SimilarUV)
+                {
+                    previewFaces = GetSimilarUVFaces(hoveredFaceIndex);
+                    previewColor = new Color(hoverFaceColor.r, hoverFaceColor.g, hoverFaceColor.b, hoverFaceColor.a * 0.6f);
+                }
+                else
+                {
+                    previewFaces.Add(hoveredFaceIndex);
+                }
+                
+                foreach (int faceIndex in previewFaces)
                 {
                     if (!selectedFaces.Contains(faceIndex))
                     {
                         DrawFace(faceIndex, previewColor, matrix, vertices);
                     }
                 }
-            }
-            else if (hoveredFaceIndex >= 0 && !selectedFaces.Contains(hoveredFaceIndex))
-            {
-                DrawFace(hoveredFaceIndex, hoverFaceColor, matrix, vertices);
             }
         }
         
@@ -766,6 +840,272 @@ namespace MeshUVMaskGenerator
             
             // Consider the face visible if at least half of the check points are visible
             return visiblePoints >= checkPoints.Length / 2;
+        }
+        
+        private HashSet<int> GetSimilarUVFaces(int referenceFaceIndex)
+        {
+            HashSet<int> similarFaces = new HashSet<int>();
+            
+            switch (similarityMode)
+            {
+                case SimilarityMode.TextureColor:
+                    return GetSimilarColorFaces(referenceFaceIndex);
+                    
+                case SimilarityMode.UVRange:
+                    return GetSimilarUVRangeFaces(referenceFaceIndex);
+                    
+                case SimilarityMode.UVDensity:
+                    return GetSimilarDensityFaces(referenceFaceIndex);
+                    
+                case SimilarityMode.MaterialSame:
+                    return GetSameMaterialFaces(referenceFaceIndex);
+                    
+                default:
+                    similarFaces.Add(referenceFaceIndex);
+                    return similarFaces;
+            }
+        }
+        
+        private HashSet<int> GetSimilarColorFaces(int referenceFaceIndex)
+        {
+            HashSet<int> similarFaces = new HashSet<int>();
+            
+            // Get the material and texture
+            MeshRenderer meshRenderer = targetObject.GetComponent<MeshRenderer>();
+            SkinnedMeshRenderer skinnedRenderer = targetObject.GetComponent<SkinnedMeshRenderer>();
+            Material[] materials = meshRenderer != null ? meshRenderer.sharedMaterials : 
+                                 skinnedRenderer != null ? skinnedRenderer.sharedMaterials : null;
+            
+            if (materials == null || materials.Length == 0)
+                return similarFaces;
+                
+            // Get reference face's material and UV coordinates
+            int materialIndex = GetFaceMaterialIndex(referenceFaceIndex);
+            if (materialIndex >= materials.Length || materials[materialIndex] == null)
+                return similarFaces;
+                
+            Material material = materials[materialIndex];
+            Texture2D texture = material.mainTexture as Texture2D;
+            
+            if (texture == null)
+                return similarFaces;
+                
+            // Sample color from reference face
+            Color referenceColor = SampleFaceColor(referenceFaceIndex, texture);
+            
+            // Find all faces with similar colors
+            foreach (var kvp in faceToTriangles)
+            {
+                int faceIndex = kvp.Key;
+                int faceMaterialIndex = GetFaceMaterialIndex(faceIndex);
+                
+                // Must use same material
+                if (faceMaterialIndex != materialIndex)
+                    continue;
+                    
+                Color faceColor = SampleFaceColor(faceIndex, texture);
+                
+                if (IsColorSimilar(referenceColor, faceColor, colorThreshold))
+                {
+                    similarFaces.Add(faceIndex);
+                }
+            }
+            
+            return similarFaces;
+        }
+        
+        private HashSet<int> GetSimilarUVRangeFaces(int referenceFaceIndex)
+        {
+            HashSet<int> similarFaces = new HashSet<int>();
+            
+            Vector2[] uvs = targetMesh.uv;
+            if (uvs == null || uvs.Length == 0)
+                return similarFaces;
+                
+            // Get reference face UV bounds
+            var refBounds = GetFaceUVBounds(referenceFaceIndex, uvs);
+            
+            foreach (var kvp in faceToTriangles)
+            {
+                int faceIndex = kvp.Key;
+                var faceBounds = GetFaceUVBounds(faceIndex, uvs);
+                
+                // Compare UV ranges
+                Vector2 centerDiff = refBounds.center - faceBounds.center;
+                Vector2 sizeDiff = refBounds.size - faceBounds.size;
+                
+                if (centerDiff.magnitude < uvRangeThreshold && sizeDiff.magnitude < uvRangeThreshold)
+                {
+                    similarFaces.Add(faceIndex);
+                }
+            }
+            
+            return similarFaces;
+        }
+        
+        private HashSet<int> GetSimilarDensityFaces(int referenceFaceIndex)
+        {
+            HashSet<int> similarFaces = new HashSet<int>();
+            
+            float referenceDensity = CalculateUVDensity(referenceFaceIndex);
+            
+            foreach (var kvp in faceToTriangles)
+            {
+                int faceIndex = kvp.Key;
+                float faceDensity = CalculateUVDensity(faceIndex);
+                
+                float densityDiff = Mathf.Abs(referenceDensity - faceDensity) / (referenceDensity + 0.001f);
+                
+                if (densityDiff < densityThreshold)
+                {
+                    similarFaces.Add(faceIndex);
+                }
+            }
+            
+            return similarFaces;
+        }
+        
+        private HashSet<int> GetSameMaterialFaces(int referenceFaceIndex)
+        {
+            HashSet<int> similarFaces = new HashSet<int>();
+            
+            int referenceMaterialIndex = GetFaceMaterialIndex(referenceFaceIndex);
+            
+            foreach (var kvp in faceToTriangles)
+            {
+                int faceIndex = kvp.Key;
+                int faceMaterialIndex = GetFaceMaterialIndex(faceIndex);
+                
+                if (faceMaterialIndex == referenceMaterialIndex)
+                {
+                    similarFaces.Add(faceIndex);
+                }
+            }
+            
+            return similarFaces;
+        }
+        
+        private Color SampleFaceColor(int faceIndex, Texture2D texture)
+        {
+            Vector2[] uvs = targetMesh.uv;
+            if (uvs == null || uvs.Length == 0)
+                return Color.white;
+                
+            List<int> triangleIndices = faceToTriangles[faceIndex];
+            
+            // Sample color from face center UV
+            Vector2 centerUV = (uvs[triangleIndices[0]] + uvs[triangleIndices[1]] + uvs[triangleIndices[2]]) / 3f;
+            
+            // Clamp UV coordinates
+            centerUV.x = Mathf.Clamp01(centerUV.x);
+            centerUV.y = Mathf.Clamp01(centerUV.y);
+            
+            // Sample texture
+            int x = Mathf.FloorToInt(centerUV.x * (texture.width - 1));
+            int y = Mathf.FloorToInt(centerUV.y * (texture.height - 1));
+            
+            try
+            {
+                return texture.GetPixel(x, y);
+            }
+            catch
+            {
+                return Color.white;
+            }
+        }
+        
+        private bool IsColorSimilar(Color color1, Color color2, float threshold)
+        {
+            if (useHSVComparison)
+            {
+                Color.RGBToHSV(color1, out float h1, out float s1, out float v1);
+                Color.RGBToHSV(color2, out float h2, out float s2, out float v2);
+                
+                float hDiff = Mathf.Min(Mathf.Abs(h1 - h2), 1f - Mathf.Abs(h1 - h2)); // Handle hue wraparound
+                float sDiff = Mathf.Abs(s1 - s2);
+                float vDiff = Mathf.Abs(v1 - v2);
+                
+                return (hDiff + sDiff + vDiff) / 3f < threshold;
+            }
+            else
+            {
+                float rDiff = Mathf.Abs(color1.r - color2.r);
+                float gDiff = Mathf.Abs(color1.g - color2.g);
+                float bDiff = Mathf.Abs(color1.b - color2.b);
+                
+                return (rDiff + gDiff + bDiff) / 3f < threshold;
+            }
+        }
+        
+        private Rect GetFaceUVBounds(int faceIndex, Vector2[] uvs)
+        {
+            List<int> triangleIndices = faceToTriangles[faceIndex];
+            
+            Vector2 min = uvs[triangleIndices[0]];
+            Vector2 max = uvs[triangleIndices[0]];
+            
+            for (int i = 1; i < triangleIndices.Count; i++)
+            {
+                Vector2 uv = uvs[triangleIndices[i]];
+                min = Vector2.Min(min, uv);
+                max = Vector2.Max(max, uv);
+            }
+            
+            return new Rect(min.x, min.y, max.x - min.x, max.y - min.y);
+        }
+        
+        private float CalculateUVDensity(int faceIndex)
+        {
+            Vector3[] vertices = targetMesh.vertices;
+            Vector2[] uvs = targetMesh.uv;
+            
+            if (uvs == null || uvs.Length == 0)
+                return 0f;
+                
+            List<int> triangleIndices = faceToTriangles[faceIndex];
+            
+            // Calculate 3D triangle area
+            Vector3 v0 = vertices[triangleIndices[0]];
+            Vector3 v1 = vertices[triangleIndices[1]];
+            Vector3 v2 = vertices[triangleIndices[2]];
+            
+            Vector3 edge1 = v1 - v0;
+            Vector3 edge2 = v2 - v0;
+            float area3D = Vector3.Cross(edge1, edge2).magnitude * 0.5f;
+            
+            // Calculate UV triangle area
+            Vector2 uv0 = uvs[triangleIndices[0]];
+            Vector2 uv1 = uvs[triangleIndices[1]];
+            Vector2 uv2 = uvs[triangleIndices[2]];
+            
+            Vector2 uvEdge1 = uv1 - uv0;
+            Vector2 uvEdge2 = uv2 - uv0;
+            float areaUV = Mathf.Abs(uvEdge1.x * uvEdge2.y - uvEdge1.y * uvEdge2.x) * 0.5f;
+            
+            // UV density = UV area / 3D area
+            return areaUV / (area3D + 0.0001f);
+        }
+        
+        private int GetFaceMaterialIndex(int faceIndex)
+        {
+            // For single material meshes
+            if (targetMesh.subMeshCount <= 1)
+                return 0;
+                
+            // Find which submesh this face belongs to
+            int triangleIndex = faceIndex * 3;
+            
+            for (int submeshIndex = 0; submeshIndex < targetMesh.subMeshCount; submeshIndex++)
+            {
+                var submesh = targetMesh.GetSubMesh(submeshIndex);
+                if (triangleIndex >= submesh.indexStart && 
+                    triangleIndex < submesh.indexStart + submesh.indexCount)
+                {
+                    return submeshIndex;
+                }
+            }
+            
+            return 0;
         }
     }
 }
