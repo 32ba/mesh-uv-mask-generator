@@ -1,0 +1,104 @@
+name: Build Release
+
+on: 
+  workflow_dispatch:
+
+jobs:
+
+  # Validate Repository Configuration
+  config:
+    runs-on: ubuntu-latest
+    outputs:
+      config_package: ${{ steps.config_package.outputs.configPackage }}
+    steps:
+
+    # Ensure that required repository variable has been created for the Package
+    - name: Validate Package Config
+      id: config_package
+      run: |
+        if [ "${{ vars.PACKAGE_NAME }}" != "" ]; then
+          echo "configPackage=true" >> $GITHUB_OUTPUT;
+        else
+          echo "configPackage=false" >> $GITHUB_OUTPUT;
+        fi
+
+  # Build and release the Package
+  # If the repository is not configured properly, this job will be skipped
+  build:
+    needs: config
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      packagePath: ./
+    if: needs.config.outputs.config_package == 'true'
+    steps:
+
+      # Checkout Local Repository
+      - name: Checkout
+        uses: actions/checkout@3df4ab11eba7bda6032a0b82a6bb43b11571feac
+
+      - name: Generate token
+        id: generate_token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      # Get the Package version based on the package.json file
+      - name: Get Version
+        id: version
+        uses: zoexx/github-action-json-file-properties@b9f36ce6ee6fe2680cd3c32b2c62e22eade7e590
+        with: 
+            file_path: "package.json"
+            prop_path: "version"
+    
+      # Configure the Environment Variables needed for releasing the Package
+      - name: Set Environment Variables
+        id: set_env
+        run: |
+          echo "zipFile=${{ vars.PACKAGE_NAME }}-${{ steps.version.outputs.value }}".zip >> $GITHUB_OUTPUT
+          echo "unityPackage=${{ vars.PACKAGE_NAME }}-${{ steps.version.outputs.value }}.unitypackage" >> $GITHUB_OUTPUT
+          
+      # Zip the Package for release
+      - name: Create Package Zip
+        working-directory: "${{ env.packagePath }}"
+        run: zip -r "${{ github.workspace }}/${{ steps.set_env.outputs.zipFile }}" . -x '.*' '*/.*'
+      
+      # Build a list of .meta files for future use
+      - name: Track Package Meta Files
+        run: find "${{ env.packagePath }}/" -name \*.meta >> metaList
+      
+      # Make a UnityPackage version of the Package for release
+      - name: Create UnityPackage
+        uses: pCYSl5EDgo/create-unitypackage@v1.2.3
+        with:
+          package-path: ${{ steps.set_env.outputs.unityPackage }}
+          include-files: metaList
+      
+      # Make a release tag of the version from the package.json file 
+      - name: Create Tag
+        id: tag_version
+        uses: rickstaa/action-create-tag@88dbf7ff6fe2405f8e8f6c6fdfd78829bc631f83
+        with:
+          tag: "${{ steps.version.outputs.value }}"
+      
+      # Publish the Release to GitHub
+      - name: Make Release
+        uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844
+        with:
+          files: |
+            ${{ steps.set_env.outputs.zipFile }}
+            ${{ steps.set_env.outputs.unityPackage }}
+            package.json
+          tag_name: ${{ steps.version.outputs.value }}
+
+      # Update listing using the GitHub API
+      - name: Update VPM repository
+        run: |
+          curl -X POST \
+            -H "Authorization: Bearer ${{ steps.generate_token.outputs.token }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/${{ github.repository_owner }}/vpm.32ba.net/dispatches \
+            -d '{"event_type": "update-listing", "client_payload": {}}'
