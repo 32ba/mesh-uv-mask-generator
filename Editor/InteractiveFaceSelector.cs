@@ -21,38 +21,18 @@ namespace MeshUVMaskGenerator
         private bool addToSelection = true;
         private Vector2 scrollPosition;
         
-        // Planar selection mode
+        // Selection mode
         private enum SelectionBehavior
         {
             SingleFace,
-            PlanarFaces,
-            SimilarUV
+            UVRange
         }
-        private SelectionBehavior selectionBehavior = SelectionBehavior.PlanarFaces;
-        private float planarAngleThreshold = 5.0f; // Degrees
-        private bool showPlanarPreview = true;
-        
-        // Similar UV selection settings
-        private enum SimilarityMode
-        {
-            TextureColor,
-            UVRange,
-            UVDensity,
-            MaterialSame
-        }
-        private SimilarityMode similarityMode = SimilarityMode.TextureColor;
-        private float colorThreshold = 0.1f; // Color similarity threshold (0-1)
+        private SelectionBehavior selectionBehavior = SelectionBehavior.SingleFace;
         private float uvRangeThreshold = 0.1f; // UV coordinate range threshold
-        private float densityThreshold = 0.2f; // UV density similarity threshold
-        private bool useHSVComparison = true; // Use HSV instead of RGB for color comparison
         
         // Occlusion detection settings
         private bool checkOcclusion = true;
         private LayerMask occlusionLayerMask = -1; // All layers by default
-        
-        // Texture read/write management
-        private Dictionary<Texture2D, bool> originalReadWriteSettings = new Dictionary<Texture2D, bool>();
-        private HashSet<Texture2D> modifiedTextures = new HashSet<Texture2D>();
         
         private Material highlightMaterial;
         private Material wireframeMaterial;
@@ -95,9 +75,6 @@ namespace MeshUVMaskGenerator
             SceneView.duringSceneGui -= OnSceneGUI;
             Selection.selectionChanged -= OnSelectionChanged;
             
-            // Restore original texture settings
-            RestoreTextureSettings();
-            
             if (highlightMaterial != null)
                 DestroyImmediate(highlightMaterial);
             if (wireframeMaterial != null)
@@ -128,12 +105,6 @@ namespace MeshUVMaskGenerator
         
         private void SetTarget(GameObject target)
         {
-            // Clean up textures from previous target before switching
-            if (targetObject != target)
-            {
-                RestoreTextureSettings();
-            }
-            
             targetObject = target;
             meshFilter = target.GetComponent<MeshFilter>();
             skinnedMeshRenderer = target.GetComponent<SkinnedMeshRenderer>();
@@ -216,14 +187,9 @@ namespace MeshUVMaskGenerator
             }
             else
             {
-                // If no object is selected, clean up current textures
-                if (targetObject != null)
-                {
-                    RestoreTextureSettings();
-                    targetObject = null;
-                    targetMesh = null;
-                    Repaint();
-                }
+                targetObject = null;
+                targetMesh = null;
+                Repaint();
             }
         }
         
@@ -261,60 +227,14 @@ namespace MeshUVMaskGenerator
             
             selectionBehavior = (SelectionBehavior)EditorGUILayout.EnumPopup("Click Behavior", selectionBehavior);
             
-            if (selectionBehavior == SelectionBehavior.PlanarFaces)
+            if (selectionBehavior == SelectionBehavior.UVRange)
             {
-                planarAngleThreshold = EditorGUILayout.Slider("Angle Threshold (degrees)", planarAngleThreshold, 0.1f, 45.0f);
-                showPlanarPreview = EditorGUILayout.Toggle("Show Planar Preview", showPlanarPreview);
+                uvRangeThreshold = EditorGUILayout.Slider("UV Range Threshold", uvRangeThreshold, 0.01f, 0.5f);
                 EditorGUILayout.HelpBox(
-                    "Click on a face to select all coplanar faces within the angle threshold.\n" +
-                    "Lower values = stricter planar detection\n" +
-                    "Higher values = more permissive selection",
+                    "Select faces using similar UV coordinate ranges.\n" +
+                    "Useful for selecting faces from the same texture atlas region",
                     MessageType.Info
                 );
-            }
-            else if (selectionBehavior == SelectionBehavior.SimilarUV)
-            {
-                similarityMode = (SimilarityMode)EditorGUILayout.EnumPopup("Similarity Mode", similarityMode);
-                
-                switch (similarityMode)
-                {
-                    case SimilarityMode.TextureColor:
-                        colorThreshold = EditorGUILayout.Slider("Color Threshold", colorThreshold, 0.01f, 1.0f);
-                        useHSVComparison = EditorGUILayout.Toggle("Use HSV Comparison", useHSVComparison);
-                        EditorGUILayout.HelpBox(
-                            "Select faces with similar texture colors.\n" +
-                            "Lower threshold = more exact color match\n" +
-                            "HSV comparison is more perceptually accurate",
-                            MessageType.Info
-                        );
-                        break;
-                        
-                    case SimilarityMode.UVRange:
-                        uvRangeThreshold = EditorGUILayout.Slider("UV Range Threshold", uvRangeThreshold, 0.01f, 0.5f);
-                        EditorGUILayout.HelpBox(
-                            "Select faces using similar UV coordinate ranges.\n" +
-                            "Useful for selecting faces from the same texture atlas region",
-                            MessageType.Info
-                        );
-                        break;
-                        
-                    case SimilarityMode.UVDensity:
-                        densityThreshold = EditorGUILayout.Slider("Density Threshold", densityThreshold, 0.01f, 1.0f);
-                        EditorGUILayout.HelpBox(
-                            "Select faces with similar UV density (texel density).\n" +
-                            "Finds faces with similar texture scale/resolution",
-                            MessageType.Info
-                        );
-                        break;
-                        
-                    case SimilarityMode.MaterialSame:
-                        EditorGUILayout.HelpBox(
-                            "Select all faces using the same material.\n" +
-                            "Perfect for selecting all faces with identical shading",
-                            MessageType.Info
-                        );
-                        break;
-                }
             }
             
             EditorGUILayout.Space();
@@ -450,15 +370,10 @@ namespace MeshUVMaskGenerator
                             
                             HashSet<int> facesToSelect = new HashSet<int>();
                             
-                            if (selectionBehavior == SelectionBehavior.PlanarFaces)
+                            if (selectionBehavior == SelectionBehavior.UVRange)
                             {
-                                // Select all coplanar faces
-                                facesToSelect = GetCoplanarFaces(hoveredFaceIndex);
-                            }
-                            else if (selectionBehavior == SelectionBehavior.SimilarUV)
-                            {
-                                // Select all similar UV faces
-                                facesToSelect = GetSimilarUVFaces(hoveredFaceIndex);
+                                // Select all similar UV range faces
+                                facesToSelect = GetSimilarUVRangeFaces(hoveredFaceIndex);
                             }
                             else
                             {
@@ -632,14 +547,9 @@ namespace MeshUVMaskGenerator
                 HashSet<int> previewFaces = new HashSet<int>();
                 Color previewColor = hoverFaceColor;
                 
-                if (showPlanarPreview && selectionBehavior == SelectionBehavior.PlanarFaces)
+                if (selectionBehavior == SelectionBehavior.UVRange)
                 {
-                    previewFaces = GetCoplanarFaces(hoveredFaceIndex);
-                    previewColor = new Color(hoverFaceColor.r, hoverFaceColor.g, hoverFaceColor.b, hoverFaceColor.a * 0.5f);
-                }
-                else if (selectionBehavior == SelectionBehavior.SimilarUV)
-                {
-                    previewFaces = GetSimilarUVFaces(hoveredFaceIndex);
+                    previewFaces = GetSimilarUVRangeFaces(hoveredFaceIndex);
                     previewColor = new Color(hoverFaceColor.r, hoverFaceColor.g, hoverFaceColor.b, hoverFaceColor.a * 0.6f);
                 }
                 else
@@ -748,66 +658,6 @@ namespace MeshUVMaskGenerator
             return triangles;
         }
         
-        private HashSet<int> GetCoplanarFaces(int referenceFaceIndex)
-        {
-            HashSet<int> coplanarFaces = new HashSet<int>();
-            
-            if (!faceNormals.ContainsKey(referenceFaceIndex))
-                return coplanarFaces;
-                
-            Vector3 referenceNormal = faceNormals[referenceFaceIndex];
-            float angleThresholdRadians = planarAngleThreshold * Mathf.Deg2Rad;
-            float dotThreshold = Mathf.Cos(angleThresholdRadians);
-            
-            // Find all faces with similar normals
-            foreach (var kvp in faceNormals)
-            {
-                int faceIndex = kvp.Key;
-                Vector3 faceNormal = kvp.Value;
-                
-                float dot = Vector3.Dot(referenceNormal, faceNormal);
-                
-                // Check if normals are similar (accounting for both same and opposite directions)
-                if (dot >= dotThreshold || dot <= -dotThreshold)
-                {
-                    // Additional check: verify if faces are actually on the same plane
-                    if (AreFacesCoplanar(referenceFaceIndex, faceIndex, angleThresholdRadians))
-                    {
-                        coplanarFaces.Add(faceIndex);
-                    }
-                }
-            }
-            
-            return coplanarFaces;
-        }
-        
-        private bool AreFacesCoplanar(int face1Index, int face2Index, float angleThreshold)
-        {
-            if (!faceToTriangles.ContainsKey(face1Index) || !faceToTriangles.ContainsKey(face2Index))
-                return false;
-                
-            Vector3[] vertices = targetMesh.vertices;
-            
-            // Get a point from each face
-            List<int> face1Indices = faceToTriangles[face1Index];
-            List<int> face2Indices = faceToTriangles[face2Index];
-            
-            Vector3 point1 = vertices[face1Indices[0]];
-            Vector3 point2 = vertices[face2Indices[0]];
-            
-            // Get the normal of face1
-            Vector3 normal1 = faceNormals[face1Index];
-            
-            // Calculate the vector from face1 to face2
-            Vector3 vectorBetweenFaces = (point2 - point1).normalized;
-            
-            // If the vector between faces is perpendicular to the normal,
-            // the faces are coplanar
-            float dot = Mathf.Abs(Vector3.Dot(normal1, vectorBetweenFaces));
-            
-            // Allow some tolerance for "nearly coplanar" faces
-            return dot < Mathf.Sin(angleThreshold);
-        }
         
         private bool IsFaceVisible(Ray ray, Vector3 v0, Vector3 v1, Vector3 v2, float faceDistance)
         {
@@ -873,105 +723,6 @@ namespace MeshUVMaskGenerator
             return visiblePoints >= checkPoints.Length / 2;
         }
         
-        private HashSet<int> GetSimilarUVFaces(int referenceFaceIndex)
-        {
-            HashSet<int> similarFaces = new HashSet<int>();
-            
-            switch (similarityMode)
-            {
-                case SimilarityMode.TextureColor:
-                    return GetSimilarColorFaces(referenceFaceIndex);
-                    
-                case SimilarityMode.UVRange:
-                    return GetSimilarUVRangeFaces(referenceFaceIndex);
-                    
-                case SimilarityMode.UVDensity:
-                    return GetSimilarDensityFaces(referenceFaceIndex);
-                    
-                case SimilarityMode.MaterialSame:
-                    return GetSameMaterialFaces(referenceFaceIndex);
-                    
-                default:
-                    similarFaces.Add(referenceFaceIndex);
-                    return similarFaces;
-            }
-        }
-        
-        private HashSet<int> GetSimilarColorFaces(int referenceFaceIndex)
-        {
-            HashSet<int> similarFaces = new HashSet<int>();
-            
-            // Get the material and texture
-            MeshRenderer meshRenderer = targetObject.GetComponent<MeshRenderer>();
-            SkinnedMeshRenderer skinnedRenderer = targetObject.GetComponent<SkinnedMeshRenderer>();
-            Material[] materials = meshRenderer != null ? meshRenderer.sharedMaterials : 
-                                 skinnedRenderer != null ? skinnedRenderer.sharedMaterials : null;
-            
-            if (materials == null || materials.Length == 0)
-            {
-                Debug.LogWarning("[UV Mask Generator] No materials found on target object");
-                return similarFaces;
-            }
-                
-            // Get reference face's material and UV coordinates
-            int materialIndex = GetFaceMaterialIndex(referenceFaceIndex);
-            if (materialIndex >= materials.Length || materials[materialIndex] == null)
-            {
-                Debug.LogWarning($"[UV Mask Generator] Invalid material index {materialIndex} for face {referenceFaceIndex}");
-                return similarFaces;
-            }
-                
-            Material material = materials[materialIndex];
-            Texture2D texture = material.mainTexture as Texture2D;
-            
-            if (texture == null)
-            {
-                Debug.LogWarning($"[UV Mask Generator] No main texture found on material {material.name}");
-                return similarFaces;
-            }
-            
-            // Ensure texture is readable (temporarily enable if needed)
-            if (!EnsureTextureReadable(texture))
-            {
-                Debug.LogError($"[UV Mask Generator] Failed to make texture '{texture.name}' readable.");
-                return similarFaces;
-            }
-                
-            // Sample color from reference face
-            Color referenceColor = SampleFaceColor(referenceFaceIndex, texture);
-            if (referenceColor == Color.clear) // Invalid color sample
-            {
-                Debug.LogWarning($"[UV Mask Generator] Failed to sample color from reference face {referenceFaceIndex}");
-                return similarFaces;
-            }
-            
-            Debug.Log($"[UV Mask Generator] Reference color: {referenceColor}, Threshold: {colorThreshold}");
-            
-            int matchCount = 0;
-            // Find all faces with similar colors
-            foreach (var kvp in faceToTriangles)
-            {
-                int faceIndex = kvp.Key;
-                int faceMaterialIndex = GetFaceMaterialIndex(faceIndex);
-                
-                // Must use same material
-                if (faceMaterialIndex != materialIndex)
-                    continue;
-                    
-                Color faceColor = SampleFaceColor(faceIndex, texture);
-                if (faceColor == Color.clear) // Invalid color sample
-                    continue;
-                
-                if (IsColorSimilar(referenceColor, faceColor, colorThreshold))
-                {
-                    similarFaces.Add(faceIndex);
-                    matchCount++;
-                }
-            }
-            
-            Debug.Log($"[UV Mask Generator] Found {matchCount} similar faces with threshold {colorThreshold}");
-            return similarFaces;
-        }
         
         private HashSet<int> GetSimilarUVRangeFaces(int referenceFaceIndex)
         {
@@ -1007,161 +758,7 @@ namespace MeshUVMaskGenerator
             return similarFaces;
         }
         
-        private HashSet<int> GetSimilarDensityFaces(int referenceFaceIndex)
-        {
-            HashSet<int> similarFaces = new HashSet<int>();
-            
-            float referenceDensity = CalculateUVDensity(referenceFaceIndex);
-            
-            foreach (var kvp in faceToTriangles)
-            {
-                int faceIndex = kvp.Key;
-                float faceDensity = CalculateUVDensity(faceIndex);
-                
-                float densityDiff = Mathf.Abs(referenceDensity - faceDensity) / (referenceDensity + 0.001f);
-                
-                if (densityDiff < densityThreshold)
-                {
-                    similarFaces.Add(faceIndex);
-                }
-            }
-            
-            return similarFaces;
-        }
         
-        private HashSet<int> GetSameMaterialFaces(int referenceFaceIndex)
-        {
-            HashSet<int> similarFaces = new HashSet<int>();
-            
-            int referenceMaterialIndex = GetFaceMaterialIndex(referenceFaceIndex);
-            
-            foreach (var kvp in faceToTriangles)
-            {
-                int faceIndex = kvp.Key;
-                int faceMaterialIndex = GetFaceMaterialIndex(faceIndex);
-                
-                if (faceMaterialIndex == referenceMaterialIndex)
-                {
-                    similarFaces.Add(faceIndex);
-                }
-            }
-            
-            return similarFaces;
-        }
-        
-        private Color SampleFaceColor(int faceIndex, Texture2D texture)
-        {
-            Vector2[] uvs = targetMesh.uv;
-            if (uvs == null || uvs.Length == 0)
-            {
-                return Color.clear; // Return clear instead of white to indicate error
-            }
-                
-            List<int> triangleIndices = faceToTriangles[faceIndex];
-            if (triangleIndices == null || triangleIndices.Count < 3)
-            {
-                return Color.clear;
-            }
-            
-            // Check if all UV indices are valid
-            foreach (int index in triangleIndices)
-            {
-                if (index < 0 || index >= uvs.Length)
-                {
-                    return Color.clear;
-                }
-            }
-            
-            // Sample color from multiple points for better accuracy
-            Vector2[] sampleUVs = new Vector2[]
-            {
-                uvs[triangleIndices[0]],
-                uvs[triangleIndices[1]], 
-                uvs[triangleIndices[2]],
-                (uvs[triangleIndices[0]] + uvs[triangleIndices[1]] + uvs[triangleIndices[2]]) / 3f // Face center
-            };
-            
-            List<Color> sampledColors = new List<Color>();
-            
-            foreach (Vector2 uv in sampleUVs)
-            {
-                // Handle UV wrapping properly
-                Vector2 clampedUV = new Vector2(
-                    uv.x - Mathf.Floor(uv.x), // Wrap to 0-1 range
-                    uv.y - Mathf.Floor(uv.y)
-                );
-                
-                // Sample texture
-                int x = Mathf.Clamp(Mathf.FloorToInt(clampedUV.x * texture.width), 0, texture.width - 1);
-                int y = Mathf.Clamp(Mathf.FloorToInt(clampedUV.y * texture.height), 0, texture.height - 1);
-                
-                try
-                {
-                    Color sampledColor = texture.GetPixel(x, y);
-                    sampledColors.Add(sampledColor);
-                }
-                catch (System.Exception e)
-                {
-                    Debug.LogWarning($"[UV Mask Generator] Failed to sample texture at ({x}, {y}): {e.Message}");
-                    continue;
-                }
-            }
-            
-            if (sampledColors.Count == 0)
-            {
-                return Color.clear;
-            }
-            
-            // Return average color
-            Color avgColor = Color.black;
-            foreach (Color color in sampledColors)
-            {
-                avgColor += color;
-            }
-            avgColor /= sampledColors.Count;
-            
-            return avgColor;
-        }
-        
-        private bool IsColorSimilar(Color color1, Color color2, float threshold)
-        {
-            // Skip comparison if either color is invalid
-            if (color1 == Color.clear || color2 == Color.clear)
-                return false;
-                
-            if (useHSVComparison)
-            {
-                Color.RGBToHSV(color1, out float h1, out float s1, out float v1);
-                Color.RGBToHSV(color2, out float h2, out float s2, out float v2);
-                
-                // Special handling for grayscale colors (low saturation)
-                if (s1 < 0.1f && s2 < 0.1f)
-                {
-                    // For grayscale, only compare value (brightness)
-                    return Mathf.Abs(v1 - v2) < threshold;
-                }
-                
-                // Handle hue wraparound (0 and 1 are the same hue)
-                float hDiff = Mathf.Min(Mathf.Abs(h1 - h2), 1f - Mathf.Abs(h1 - h2));
-                float sDiff = Mathf.Abs(s1 - s2);
-                float vDiff = Mathf.Abs(v1 - v2);
-                
-                // Weighted comparison: value is most important, then saturation, then hue
-                float difference = (vDiff * 0.5f + sDiff * 0.3f + hDiff * 0.2f);
-                return difference < threshold;
-            }
-            else
-            {
-                // Standard RGB distance
-                float rDiff = Mathf.Abs(color1.r - color2.r);
-                float gDiff = Mathf.Abs(color1.g - color2.g);
-                float bDiff = Mathf.Abs(color1.b - color2.b);
-                
-                // Use Euclidean distance for more accurate color comparison
-                float distance = Mathf.Sqrt(rDiff * rDiff + gDiff * gDiff + bDiff * bDiff) / Mathf.Sqrt(3f);
-                return distance < threshold;
-            }
-        }
         
         private Rect GetFaceUVBounds(int faceIndex, Vector2[] uvs)
         {
@@ -1180,59 +777,6 @@ namespace MeshUVMaskGenerator
             return new Rect(min.x, min.y, max.x - min.x, max.y - min.y);
         }
         
-        private float CalculateUVDensity(int faceIndex)
-        {
-            Vector3[] vertices = targetMesh.vertices;
-            Vector2[] uvs = targetMesh.uv;
-            
-            if (uvs == null || uvs.Length == 0)
-                return 0f;
-                
-            List<int> triangleIndices = faceToTriangles[faceIndex];
-            
-            // Calculate 3D triangle area
-            Vector3 v0 = vertices[triangleIndices[0]];
-            Vector3 v1 = vertices[triangleIndices[1]];
-            Vector3 v2 = vertices[triangleIndices[2]];
-            
-            Vector3 edge1 = v1 - v0;
-            Vector3 edge2 = v2 - v0;
-            float area3D = Vector3.Cross(edge1, edge2).magnitude * 0.5f;
-            
-            // Calculate UV triangle area
-            Vector2 uv0 = uvs[triangleIndices[0]];
-            Vector2 uv1 = uvs[triangleIndices[1]];
-            Vector2 uv2 = uvs[triangleIndices[2]];
-            
-            Vector2 uvEdge1 = uv1 - uv0;
-            Vector2 uvEdge2 = uv2 - uv0;
-            float areaUV = Mathf.Abs(uvEdge1.x * uvEdge2.y - uvEdge1.y * uvEdge2.x) * 0.5f;
-            
-            // UV density = UV area / 3D area
-            return areaUV / (area3D + 0.0001f);
-        }
-        
-        private int GetFaceMaterialIndex(int faceIndex)
-        {
-            // For single material meshes
-            if (targetMesh.subMeshCount <= 1)
-                return 0;
-                
-            // Find which submesh this face belongs to
-            int triangleIndex = faceIndex * 3;
-            
-            for (int submeshIndex = 0; submeshIndex < targetMesh.subMeshCount; submeshIndex++)
-            {
-                var submesh = targetMesh.GetSubMesh(submeshIndex);
-                if (triangleIndex >= submesh.indexStart && 
-                    triangleIndex < submesh.indexStart + submesh.indexCount)
-                {
-                    return submeshIndex;
-                }
-            }
-            
-            return 0;
-        }
         
         private void BuildFaceAdjacency()
         {
@@ -1320,114 +864,5 @@ namespace MeshUVMaskGenerator
             return connectedFaces;
         }
         
-        private bool EnsureTextureReadable(Texture2D texture)
-        {
-            if (texture.isReadable)
-                return true;
-                
-            string assetPath = UnityEditor.AssetDatabase.GetAssetPath(texture);
-            if (string.IsNullOrEmpty(assetPath))
-            {
-                Debug.LogWarning($"[UV Mask Generator] Cannot find asset path for texture '{texture.name}'");
-                return false;
-            }
-            
-            UnityEditor.TextureImporter textureImporter = UnityEditor.AssetImporter.GetAtPath(assetPath) as UnityEditor.TextureImporter;
-            if (textureImporter == null)
-            {
-                Debug.LogWarning($"[UV Mask Generator] Cannot get TextureImporter for '{assetPath}'");
-                return false;
-            }
-            
-            // Store original setting if not already stored
-            if (!originalReadWriteSettings.ContainsKey(texture))
-            {
-                originalReadWriteSettings[texture] = textureImporter.isReadable;
-                Debug.Log($"[UV Mask Generator] Stored original Read/Write setting for '{texture.name}': {textureImporter.isReadable}");
-            }
-            
-            // Enable read/write if it's not enabled
-            if (!textureImporter.isReadable)
-            {
-                textureImporter.isReadable = true;
-                modifiedTextures.Add(texture);
-                
-                try
-                {
-                    UnityEditor.AssetDatabase.ImportAsset(assetPath, UnityEditor.ImportAssetOptions.ForceUpdate);
-                    Debug.Log($"[UV Mask Generator] Temporarily enabled Read/Write for texture '{texture.name}'");
-                    return true;
-                }
-                catch (System.Exception e)
-                {
-                    Debug.LogError($"[UV Mask Generator] Failed to reimport texture '{texture.name}': {e.Message}");
-                    return false;
-                }
-            }
-            
-            return true;
-        }
-        
-        private void RestoreTextureSettings()
-        {
-            if (originalReadWriteSettings.Count == 0)
-                return;
-                
-            Debug.Log($"[UV Mask Generator] Restoring texture settings for {originalReadWriteSettings.Count} textures");
-            
-            List<string> pathsToReimport = new List<string>();
-            
-            foreach (var kvp in originalReadWriteSettings)
-            {
-                Texture2D texture = kvp.Key;
-                bool originalSetting = kvp.Value;
-                
-                if (texture == null || !modifiedTextures.Contains(texture))
-                    continue;
-                    
-                string assetPath = UnityEditor.AssetDatabase.GetAssetPath(texture);
-                if (string.IsNullOrEmpty(assetPath))
-                    continue;
-                    
-                UnityEditor.TextureImporter textureImporter = UnityEditor.AssetImporter.GetAtPath(assetPath) as UnityEditor.TextureImporter;
-                if (textureImporter == null)
-                    continue;
-                    
-                // Only restore if we actually changed it and the original was false
-                if (!originalSetting && textureImporter.isReadable)
-                {
-                    textureImporter.isReadable = originalSetting;
-                    pathsToReimport.Add(assetPath);
-                    Debug.Log($"[UV Mask Generator] Queued texture '{texture.name}' for restoration to {originalSetting}");
-                }
-            }
-            
-            // Batch reimport for better performance
-            if (pathsToReimport.Count > 0)
-            {
-                try
-                {
-                    UnityEditor.AssetDatabase.Refresh();
-                    foreach (string path in pathsToReimport)
-                    {
-                        UnityEditor.AssetDatabase.ImportAsset(path, UnityEditor.ImportAssetOptions.ForceUpdate);
-                    }
-                    Debug.Log($"[UV Mask Generator] Successfully restored {pathsToReimport.Count} texture settings");
-                }
-                catch (System.Exception e)
-                {
-                    Debug.LogError($"[UV Mask Generator] Failed to restore some textures: {e.Message}");
-                }
-            }
-            
-            // Clear tracking data
-            originalReadWriteSettings.Clear();
-            modifiedTextures.Clear();
-        }
-        
-        public void ManualCleanup()
-        {
-            RestoreTextureSettings();
-        }
     }
 }

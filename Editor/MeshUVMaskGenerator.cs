@@ -31,6 +31,8 @@ namespace MeshUVMaskGenerator
         private SelectionMode selectionMode = SelectionMode.All;
         private int selectedSubMesh = 0;
         private int selectedMaterial = 0;
+        private bool[] selectedMaterials; // For multi-material selection
+        private bool showMaterialPreview = true;
         private bool[] selectedVertexGroups;
         private string vertexGroupFilter = "";
         private List<int> customSelectedTriangles = new List<int>();
@@ -45,6 +47,7 @@ namespace MeshUVMaskGenerator
         private SelectionMode lastSelectionMode;
         private int lastSelectedSubMesh = -1;
         private int lastSelectedMaterial = -1;
+        private bool[] lastSelectedMaterials;
         private string lastVertexGroupFilter = "";
         private int lastCustomSelectedTrianglesCount = -1;
         private Mesh lastMesh;
@@ -69,15 +72,6 @@ namespace MeshUVMaskGenerator
                 DestroyImmediate(previewTexture);
             }
             
-            // Cleanup any open face selector windows
-            var faceSelectorWindows = Resources.FindObjectsOfTypeAll<InteractiveFaceSelector>();
-            foreach (var window in faceSelectorWindows)
-            {
-                if (window != null)
-                {
-                    window.ManualCleanup();
-                }
-            }
         }
 
         private void OnSelectionChanged()
@@ -100,12 +94,16 @@ namespace MeshUVMaskGenerator
                         mesh = skinnedMeshRenderer.sharedMesh;
                     }
                 }
+                
+                // Initialize material selection array when mesh changes
+                InitializeMaterialSelection();
             }
             else
             {
                 selectedGameObject = null;
                 meshFilter = null;
                 mesh = null;
+                selectedMaterials = null;
             }
             
             UpdatePreviewIfNeeded();
@@ -172,13 +170,98 @@ namespace MeshUVMaskGenerator
                     
                     if (materials != null && materials.Length > 0)
                     {
-                        string[] materialOptions = new string[materials.Length];
-                        for (int i = 0; i < materials.Length; i++)
+                        EditorGUILayout.LabelField("Material Selection", EditorStyles.boldLabel);
+                        
+                        // Show preview toggle
+                        showMaterialPreview = EditorGUILayout.Toggle("Show Material Preview", showMaterialPreview);
+                        EditorGUILayout.Space();
+                        
+                        // Initialize selectedMaterials array if needed
+                        if (selectedMaterials == null || selectedMaterials.Length != materials.Length)
                         {
-                            materialOptions[i] = materials[i] != null ? materials[i].name : $"Material {i}";
+                            InitializeMaterialSelection();
                         }
-                        selectedMaterial = EditorGUILayout.Popup("Material", selectedMaterial, materialOptions);
-                        if (selectedMaterial != lastSelectedMaterial)
+                        
+                        bool materialSelectionChanged = false;
+                        
+                        if (materials.Length == 1)
+                        {
+                            // Single material - just show info
+                            EditorGUILayout.LabelField($"Material: {(materials[0] != null ? materials[0].name : "None")}");
+                            selectedMaterials[0] = true;
+                        }
+                        else
+                        {
+                            // Multiple materials - show selection checkboxes
+                            EditorGUILayout.BeginHorizontal();
+                            if (GUILayout.Button("Select All", EditorStyles.miniButtonLeft))
+                            {
+                                for (int i = 0; i < selectedMaterials.Length; i++)
+                                {
+                                    selectedMaterials[i] = true;
+                                }
+                                materialSelectionChanged = true;
+                            }
+                            if (GUILayout.Button("Select None", EditorStyles.miniButtonRight))
+                            {
+                                for (int i = 0; i < selectedMaterials.Length; i++)
+                                {
+                                    selectedMaterials[i] = false;
+                                }
+                                materialSelectionChanged = true;
+                            }
+                            EditorGUILayout.EndHorizontal();
+                            EditorGUILayout.Space();
+                            
+                            for (int i = 0; i < materials.Length; i++)
+                            {
+                                EditorGUILayout.BeginHorizontal();
+                                
+                                bool wasSelected = selectedMaterials[i];
+                                selectedMaterials[i] = EditorGUILayout.Toggle(selectedMaterials[i], GUILayout.Width(20));
+                                
+                                if (selectedMaterials[i] != wasSelected)
+                                {
+                                    materialSelectionChanged = true;
+                                }
+                                
+                                string materialName = materials[i] != null ? materials[i].name : $"Material {i} (Missing)";
+                                EditorGUILayout.LabelField(materialName);
+                                
+                                // Show material preview
+                                if (showMaterialPreview && materials[i] != null)
+                                {
+                                    Texture2D preview = AssetPreview.GetAssetPreview(materials[i]);
+                                    if (preview != null)
+                                    {
+                                        GUILayout.Label(preview, GUILayout.Width(32), GUILayout.Height(32));
+                                    }
+                                    else
+                                    {
+                                        // Show main texture if available
+                                        Texture mainTex = materials[i].mainTexture;
+                                        if (mainTex != null)
+                                        {
+                                            GUILayout.Label(mainTex, GUILayout.Width(32), GUILayout.Height(32));
+                                        }
+                                    }
+                                }
+                                
+                                EditorGUILayout.EndHorizontal();
+                            }
+                            
+                            // Show selection summary
+                            int selectedCount = 0;
+                            for (int i = 0; i < selectedMaterials.Length; i++)
+                            {
+                                if (selectedMaterials[i]) selectedCount++;
+                            }
+                            
+                            EditorGUILayout.Space();
+                            EditorGUILayout.LabelField($"Selected: {selectedCount} / {materials.Length} materials", EditorStyles.helpBox);
+                        }
+                        
+                        if (materialSelectionChanged)
                         {
                             UpdatePreviewIfNeeded();
                         }
@@ -516,19 +599,7 @@ namespace MeshUVMaskGenerator
                     return mesh.triangles;
                     
                 case SelectionMode.Material:
-                    if (selectedMaterial < mesh.subMeshCount)
-                    {
-                        var subMesh = mesh.GetSubMesh(selectedMaterial);
-                        int[] materialTriangles = new int[subMesh.indexCount];
-                        int baseIndex = subMesh.indexStart;
-                        
-                        for (int i = 0; i < subMesh.indexCount; i++)
-                        {
-                            materialTriangles[i] = mesh.triangles[baseIndex + i];
-                        }
-                        return materialTriangles;
-                    }
-                    return mesh.triangles;
+                    return GetSelectedMaterialTriangles();
                     
                 case SelectionMode.VertexGroup:
                     return GetVertexGroupTriangles();
@@ -613,6 +684,76 @@ namespace MeshUVMaskGenerator
             return indices;
         }
         
+        private int[] GetSelectedMaterialTriangles()
+        {
+            if (selectedMaterials == null || selectedMaterials.Length == 0)
+                return mesh.triangles;
+                
+            List<int> selectedTriangles = new List<int>();
+            
+            // If no materials are selected, return empty array
+            bool anySelected = false;
+            for (int i = 0; i < selectedMaterials.Length; i++)
+            {
+                if (selectedMaterials[i])
+                {
+                    anySelected = true;
+                    break;
+                }
+            }
+            
+            if (!anySelected)
+                return new int[0];
+            
+            // Collect triangles from selected submeshes/materials
+            for (int submeshIndex = 0; submeshIndex < mesh.subMeshCount && submeshIndex < selectedMaterials.Length; submeshIndex++)
+            {
+                if (selectedMaterials[submeshIndex])
+                {
+                    var subMesh = mesh.GetSubMesh(submeshIndex);
+                    int baseIndex = subMesh.indexStart;
+                    
+                    for (int i = 0; i < subMesh.indexCount; i++)
+                    {
+                        selectedTriangles.Add(mesh.triangles[baseIndex + i]);
+                    }
+                }
+            }
+            
+            return selectedTriangles.ToArray();
+        }
+        
+        private void InitializeMaterialSelection()
+        {
+            if (selectedGameObject == null)
+            {
+                selectedMaterials = null;
+                return;
+            }
+                
+            MeshRenderer meshRenderer = selectedGameObject.GetComponent<MeshRenderer>();
+            SkinnedMeshRenderer skinnedRenderer = selectedGameObject.GetComponent<SkinnedMeshRenderer>();
+            Material[] materials = meshRenderer != null ? meshRenderer.sharedMaterials : 
+                                 skinnedRenderer != null ? skinnedRenderer.sharedMaterials : null;
+            
+            if (materials != null && materials.Length > 0)
+            {
+                // Initialize with all materials selected if array doesn't exist or size changed
+                if (selectedMaterials == null || selectedMaterials.Length != materials.Length)
+                {
+                    selectedMaterials = new bool[materials.Length];
+                    for (int i = 0; i < selectedMaterials.Length; i++)
+                    {
+                        selectedMaterials[i] = true; // Default to all selected
+                    }
+                }
+            }
+            else
+            {
+                selectedMaterials = null;
+            }
+        }
+        
         public void SetCustomSelectedFaces(List<int> triangles)
         {
             customSelectedTriangles = triangles;
@@ -637,7 +778,7 @@ namespace MeshUVMaskGenerator
                 (!fillPolygons && Mathf.Abs(lineThickness - lastLineThickness) > 0.01f) ||
                 selectionMode != lastSelectionMode ||
                 (selectionMode == SelectionMode.SubMesh && selectedSubMesh != lastSelectedSubMesh) ||
-                (selectionMode == SelectionMode.Material && selectedMaterial != lastSelectedMaterial) ||
+                (selectionMode == SelectionMode.Material && HasMaterialSelectionChanged()) ||
                 (selectionMode == SelectionMode.VertexGroup && vertexGroupFilter != lastVertexGroupFilter) ||
                 (selectionMode == SelectionMode.InteractiveFaces && customSelectedTriangles.Count != lastCustomSelectedTrianglesCount))
             {
@@ -659,8 +800,41 @@ namespace MeshUVMaskGenerator
                 lastSelectionMode = selectionMode;
                 lastSelectedSubMesh = selectedSubMesh;
                 lastSelectedMaterial = selectedMaterial;
+                UpdateLastMaterialSelection();
                 lastVertexGroupFilter = vertexGroupFilter;
                 lastCustomSelectedTrianglesCount = customSelectedTriangles.Count;
+            }
+        }
+        
+        private bool HasMaterialSelectionChanged()
+        {
+            // For backwards compatibility with single material selection
+            if (selectedMaterials == null)
+                return selectedMaterial != lastSelectedMaterial;
+                
+            // Check if multi-material selection has changed
+            if (lastSelectedMaterials == null || lastSelectedMaterials.Length != selectedMaterials.Length)
+                return true;
+                
+            for (int i = 0; i < selectedMaterials.Length; i++)
+            {
+                if (selectedMaterials[i] != lastSelectedMaterials[i])
+                    return true;
+            }
+            
+            return false;
+        }
+        
+        private void UpdateLastMaterialSelection()
+        {
+            if (selectedMaterials != null)
+            {
+                lastSelectedMaterials = new bool[selectedMaterials.Length];
+                System.Array.Copy(selectedMaterials, lastSelectedMaterials, selectedMaterials.Length);
+            }
+            else
+            {
+                lastSelectedMaterials = null;
             }
         }
 
