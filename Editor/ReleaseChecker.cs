@@ -5,6 +5,7 @@ using UnityEditor;
 
 namespace MeshUVMaskGenerator
 {
+    [InitializeOnLoad]
     public class ReleaseChecker
     {
         private const string REPOSITORY_OWNER = "32ba";
@@ -20,10 +21,19 @@ namespace MeshUVMaskGenerator
 
         public static event Action OnUpdateCheckCompleted;
 
+        static ReleaseChecker()
+        {
+            EditorApplication.delayCall += () => CheckForUpdates();
+        }
+
         public static void CheckForUpdates(bool forceCheck = false)
         {
             if (!forceCheck && !ShouldCheckForUpdates())
+            {
+                var nextCheckTime = GetNextCheckTime();
+                Debug.Log(string.Format(LocalizationManager.GetText("log.updateCheckSkipped"), nextCheckTime.ToString("yyyy/MM/dd HH:mm")));
                 return;
+            }
 
             IsChecking = true;
             HasNewVersion = false;
@@ -63,6 +73,10 @@ namespace MeshUVMaskGenerator
             {
                 HasNewVersion = true;
                 Debug.Log(string.Format(LocalizationManager.GetText("log.newVersionAvailable"), currentVersion, latestVersion));
+            }
+            else
+            {
+                Debug.Log($"[Mesh UV Mask Generator] バージョンは最新です (現在: {currentVersion})");
             }
 
             OnUpdateCheckCompleted?.Invoke();
@@ -133,6 +147,22 @@ namespace MeshUVMaskGenerator
             EditorPrefs.DeleteKey(LAST_CHECK_KEY);
         }
 
+        private static DateTime GetNextCheckTime()
+        {
+            string lastCheckString = EditorPrefs.GetString(LAST_CHECK_KEY, "");
+
+            if (string.IsNullOrEmpty(lastCheckString))
+                return DateTime.Now;
+
+            if (long.TryParse(lastCheckString, out long lastCheckBinary))
+            {
+                DateTime lastCheck = DateTime.FromBinary(lastCheckBinary);
+                return lastCheck.AddHours(24);
+            }
+
+            return DateTime.Now;
+        }
+
     }
 
 
@@ -154,6 +184,8 @@ namespace MeshUVMaskGenerator
         }
 
         readonly IEnumerator routine;
+        IEnumerator currentNestedRoutine;
+        
         EditorCoroutine(IEnumerator routine)
         {
             this.routine = routine;
@@ -171,9 +203,28 @@ namespace MeshUVMaskGenerator
 
         void Update()
         {
+            if (currentNestedRoutine != null)
+            {
+                if (currentNestedRoutine.MoveNext())
+                {
+                    return; // まだネストしたコルーチンが実行中
+                }
+                else
+                {
+                    currentNestedRoutine = null; // ネストしたコルーチンが完了
+                }
+            }
+
             if (!routine.MoveNext())
             {
                 Stop();
+                return;
+            }
+
+            // yield returnの結果をチェック
+            if (routine.Current is IEnumerator nestedRoutine)
+            {
+                currentNestedRoutine = nestedRoutine;
             }
         }
     }
