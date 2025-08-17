@@ -146,14 +146,7 @@ namespace MeshUVMaskGenerator
             EditorGUILayout.Space();
 
             // ヘッダー
-            EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("Mesh UV Mask Generator", EditorStyles.boldLabel);
-            GUILayout.FlexibleSpace();
-            if (GUILayout.Button("Test通知", GUILayout.Width(70)))
-            {
-                ReleaseChecker.SetTestNewVersion();
-            }
-            EditorGUILayout.EndHorizontal();
 
             // アップデート通知
             DrawUpdateNotification();
@@ -1384,7 +1377,7 @@ namespace MeshUVMaskGenerator
                 }
             }
 
-            return "v0.0.8";
+            return "v0.0.0";
         }
     }
 

@@ -10,14 +10,14 @@ namespace MeshUVMaskGenerator
         private const string REPOSITORY_OWNER = "32ba";
         private const string REPOSITORY_NAME = "mesh-uv-mask-generator";
         private const string LAST_CHECK_KEY = "MeshUVMaskGenerator_LastVersionCheck";
-        
+
         private static readonly GitHubApiClient apiClient = new GitHubApiClient(REPOSITORY_OWNER, REPOSITORY_NAME);
-        
+
         public static GitHubRelease LatestRelease { get; private set; }
         public static bool HasNewVersion { get; private set; }
         public static bool IsChecking { get; private set; }
         public static string CheckError { get; private set; }
-        
+
         public static event Action OnUpdateCheckCompleted;
 
         public static void CheckForUpdates(bool forceCheck = false)
@@ -44,7 +44,7 @@ namespace MeshUVMaskGenerator
         private static void HandleReleaseResponse(GitHubRelease release, bool forceCheck)
         {
             IsChecking = false;
-            
+
             if (release == null)
             {
                 CheckError = "Failed to get release information";
@@ -64,7 +64,7 @@ namespace MeshUVMaskGenerator
                 HasNewVersion = true;
                 Debug.Log($"[Mesh UV Mask Generator] 新しいバージョンが利用可能です: {currentVersion} → {latestVersion}");
             }
-            
+
             OnUpdateCheckCompleted?.Invoke();
         }
 
@@ -88,7 +88,7 @@ namespace MeshUVMaskGenerator
         private static bool ShouldCheckForUpdates()
         {
             string lastCheckString = EditorPrefs.GetString(LAST_CHECK_KEY, "");
-            
+
             if (string.IsNullOrEmpty(lastCheckString))
                 return true;
 
@@ -96,7 +96,7 @@ namespace MeshUVMaskGenerator
             {
                 DateTime lastCheck = DateTime.FromBinary(lastCheckBinary);
                 TimeSpan timeSinceLastCheck = DateTime.Now - lastCheck;
-                
+
                 // 24時間に1回チェック
                 return timeSinceLastCheck.TotalHours >= 24;
             }
@@ -108,7 +108,7 @@ namespace MeshUVMaskGenerator
         {
             // package.jsonから現在のバージョンを取得
             string packageJsonPath = "Packages/net.32ba.mesh-uv-mask-generator/package.json";
-            
+
             if (System.IO.File.Exists(packageJsonPath))
             {
                 try
@@ -124,7 +124,7 @@ namespace MeshUVMaskGenerator
             }
 
             // フォールバック: ハードコードされたバージョン
-            return "0.0.8";
+            return "0.0.0";
         }
 
 
@@ -133,19 +133,6 @@ namespace MeshUVMaskGenerator
             EditorPrefs.DeleteKey(LAST_CHECK_KEY);
         }
 
-        // テスト用: ダミーの新バージョンを設定
-        public static void SetTestNewVersion()
-        {
-            LatestRelease = new GitHubRelease
-            {
-                tag_name = "v0.0.9",
-                html_url = "https://github.com/32ba/mesh-uv-mask-generator/releases/tag/v0.0.9"
-            };
-            HasNewVersion = true;
-            IsChecking = false;
-            CheckError = null;
-            OnUpdateCheckCompleted?.Invoke();
-        }
     }
 
 
