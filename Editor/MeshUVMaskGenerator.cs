@@ -64,12 +64,19 @@ namespace MeshUVMaskGenerator
             SceneView.duringSceneGui += OnSceneGUI;
             CreateMaterials();
             OnSelectionChanged();
+
+            // アップデートチェックイベントを購読
+            ReleaseChecker.OnUpdateCheckCompleted += OnUpdateCheckCompleted;
+
+            // アップデートチェックを開始（自動）
+            ReleaseChecker.CheckForUpdates();
         }
 
         private void OnDisable()
         {
             Selection.selectionChanged -= OnSelectionChanged;
             SceneView.duringSceneGui -= OnSceneGUI;
+            ReleaseChecker.OnUpdateCheckCompleted -= OnUpdateCheckCompleted;
 
             if (previewTexture != null)
             {
@@ -129,12 +136,28 @@ namespace MeshUVMaskGenerator
             Repaint();
         }
 
+        private void OnUpdateCheckCompleted()
+        {
+            Repaint();
+        }
+
         private void OnGUI()
         {
             EditorGUILayout.Space();
 
             // ヘッダー
+            EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("Mesh UV Mask Generator", EditorStyles.boldLabel);
+            GUILayout.FlexibleSpace();
+            if (GUILayout.Button("Test通知", GUILayout.Width(70)))
+            {
+                ReleaseChecker.SetTestNewVersion();
+            }
+            EditorGUILayout.EndHorizontal();
+
+            // アップデート通知
+            DrawUpdateNotification();
+
             EditorGUILayout.Space();
 
             // オブジェクト選択表示
@@ -779,13 +802,13 @@ namespace MeshUVMaskGenerator
                 // 面の法線をワールド座標で計算
                 Vector3 worldNormal = Vector3.Cross(v1 - v0, v2 - v0).normalized;
                 Vector3 faceCenter = (v0 + v1 + v2) / 3f;
-                
+
                 // 面がカメラの方を向いているかチェック（バックフェースカリング）
                 if (sceneCamera != null)
                 {
                     Vector3 cameraDirection = (sceneCamera.transform.position - faceCenter).normalized;
                     float facingDot = Vector3.Dot(worldNormal, cameraDirection);
-                    
+
                     // 完全に裏面のもののみ除外
                     if (facingDot <= -0.2f)
                         continue;
@@ -885,7 +908,7 @@ namespace MeshUVMaskGenerator
                 {
                     distance = backDistance + thickness;
                 }
-                
+
                 // 元の面の距離に補正
                 distance = Mathf.Max(distance, 0.001f);
                 return true;
@@ -1307,5 +1330,67 @@ namespace MeshUVMaskGenerator
 
             return baseName + "_Mask.png";
         }
+
+        private void DrawUpdateNotification()
+        {
+            if (ReleaseChecker.HasNewVersion && ReleaseChecker.LatestRelease != null)
+            {
+                var release = ReleaseChecker.LatestRelease;
+
+                EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+
+                // アップデート通知ヘッダー
+                EditorGUILayout.LabelField("新しいバージョンが利用可能です", EditorStyles.boldLabel);
+
+                // バージョン情報
+                string currentVersion = GetCurrentVersionForDisplay();
+                EditorGUILayout.LabelField($"現在: {currentVersion} → 最新: {VersionUtility.FormatVersion(release.tag_name)}");
+
+
+                // ボタン
+                if (GUILayout.Button("リリースページを開く"))
+                {
+                    ReleaseChecker.OpenReleasePage();
+                }
+
+                EditorGUILayout.EndVertical();
+                EditorGUILayout.Space();
+            }
+            else if (!string.IsNullOrEmpty(ReleaseChecker.CheckError))
+            {
+                EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+                EditorGUILayout.LabelField($"アップデート確認に失敗: {ReleaseChecker.CheckError}", EditorStyles.wordWrappedLabel);
+                EditorGUILayout.EndVertical();
+                EditorGUILayout.Space();
+            }
+        }
+
+        private string GetCurrentVersionForDisplay()
+        {
+            // package.jsonから現在のバージョンを取得
+            string packageJsonPath = "Packages/net.32ba.mesh-uv-mask-generator/package.json";
+
+            if (System.IO.File.Exists(packageJsonPath))
+            {
+                try
+                {
+                    string jsonContent = System.IO.File.ReadAllText(packageJsonPath);
+                    var packageInfo = JsonUtility.FromJson<PackageInfo>(jsonContent);
+                    return VersionUtility.FormatVersion(packageInfo.version);
+                }
+                catch
+                {
+                    // エラーの場合はフォールバック
+                }
+            }
+
+            return "v0.0.8";
+        }
+    }
+
+    [System.Serializable]
+    public class PackageInfo
+    {
+        public string version;
     }
 }
