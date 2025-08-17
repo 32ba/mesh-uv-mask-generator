@@ -1,7 +1,7 @@
 {
   "name": "net.32ba.mesh-uv-mask-generator",
   "displayName": "Mesh UV Mask Generator",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "unity": "2022.3",
   "description": "Generates UV masks for 3D meshes in Unity.",
   "vrchatVersion": "2022.1.1",
