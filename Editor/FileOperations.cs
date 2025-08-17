@@ -10,14 +10,14 @@ namespace MeshUVMaskGenerator
         {
             if (texture == null)
             {
-                Debug.LogError("保存するテクスチャがありません。");
+                Debug.LogError(LocalizationManager.GetText("error.noTextureToSave"));
                 return;
             }
 
             string fileName = GenerateFileName(meshName, materialName, materialIndex);
             
             string path = EditorUtility.SaveFilePanel(
-                "テクスチャを保存",
+                LocalizationManager.GetText("dialog.saveTexture"),
                 "Assets",
                 fileName,
                 "png"
@@ -36,16 +36,16 @@ namespace MeshUVMaskGenerator
                 {
                     string relativePath = "Assets" + path.Substring(Application.dataPath.Length);
                     AssetDatabase.ImportAsset(relativePath);
-                    Debug.Log($"UVマスクを保存しました: {relativePath}");
+                    Debug.Log(string.Format(LocalizationManager.GetText("log.uvMaskSaved"), relativePath));
                 }
                 else
                 {
-                    Debug.Log($"UVマスクを保存しました: {path}");
+                    Debug.Log(string.Format(LocalizationManager.GetText("log.uvMaskSaved"), path));
                 }
             }
             catch (System.Exception ex)
             {
-                Debug.LogError($"テクスチャの保存に失敗しました: {ex.Message}");
+                Debug.LogError(string.Format(LocalizationManager.GetText("error.textureSaveFailed"), ex.Message));
             }
         }
 

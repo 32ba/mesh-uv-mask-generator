@@ -62,7 +62,7 @@ namespace MeshUVMaskGenerator
             if (VersionUtility.IsNewerVersion(currentVersion, latestVersion))
             {
                 HasNewVersion = true;
-                Debug.Log($"[Mesh UV Mask Generator] 新しいバージョンが利用可能です: {currentVersion} → {latestVersion}");
+                Debug.Log(string.Format(LocalizationManager.GetText("log.newVersionAvailable"), currentVersion, latestVersion));
             }
 
             OnUpdateCheckCompleted?.Invoke();
@@ -72,7 +72,7 @@ namespace MeshUVMaskGenerator
         {
             IsChecking = false;
             CheckError = error;
-            Debug.LogWarning($"[Mesh UV Mask Generator] アップデート確認に失敗: {error}");
+            Debug.LogWarning(string.Format(LocalizationManager.GetText("log.updateCheckFailed"), error));
             OnUpdateCheckCompleted?.Invoke();
         }
 

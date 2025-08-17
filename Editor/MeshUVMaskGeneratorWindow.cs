@@ -6,7 +6,6 @@ namespace MeshUVMaskGenerator
     public class MeshUVMaskGeneratorWindow : EditorWindow
     {
         private int selectedTab = 0;
-        private readonly string[] tabNames = { "メッシュ選択", "エクスポート" };
 
         // コンポーネント
         private MeshAnalyzer meshAnalyzer;
@@ -40,6 +39,7 @@ namespace MeshUVMaskGenerator
             Selection.selectionChanged += OnSelectionChanged;
             SceneView.duringSceneGui += OnSceneGUI;
             ReleaseChecker.OnUpdateCheckCompleted += OnUpdateCheckCompleted;
+            LocalizationManager.OnLanguageChanged += OnLanguageChanged;
 
             OnSelectionChanged();
             ReleaseChecker.CheckForUpdates();
@@ -51,6 +51,7 @@ namespace MeshUVMaskGenerator
             Selection.selectionChanged -= OnSelectionChanged;
             SceneView.duringSceneGui -= OnSceneGUI;
             ReleaseChecker.OnUpdateCheckCompleted -= OnUpdateCheckCompleted;
+            LocalizationManager.OnLanguageChanged -= OnLanguageChanged;
 
             // リソースのクリーンアップ
             if (previewTexture != null)
@@ -80,12 +81,17 @@ namespace MeshUVMaskGenerator
             Repaint();
         }
 
+        private void OnLanguageChanged()
+        {
+            Repaint();
+        }
+
         private void OnGUI()
         {
             EditorGUILayout.Space();
 
-            // ヘッダー
-            EditorGUILayout.LabelField("Mesh UV Mask Generator", EditorStyles.boldLabel);
+            // ヘッダーと言語選択
+            DrawHeader();
 
             // アップデート通知
             DrawUpdateNotification();
@@ -94,18 +100,19 @@ namespace MeshUVMaskGenerator
 
             // オブジェクト選択表示
             EditorGUI.BeginDisabledGroup(true);
-            EditorGUILayout.ObjectField("選択中のオブジェクト", meshAnalyzer.SelectedGameObject, typeof(GameObject), true);
+            EditorGUILayout.ObjectField(LocalizationManager.GetText("label.selectedObject"), meshAnalyzer.SelectedGameObject, typeof(GameObject), true);
             EditorGUI.EndDisabledGroup();
 
             if (meshAnalyzer.Mesh == null)
             {
-                EditorGUILayout.HelpBox("MeshFilterまたはSkinnedMeshRendererを持つオブジェクトを選択してください。", MessageType.Info);
+                EditorGUILayout.HelpBox(LocalizationManager.GetText("help.selectMeshObject"), MessageType.Info);
                 return;
             }
 
             EditorGUILayout.Space();
 
             // タブ
+            string[] tabNames = { LocalizationManager.GetText("tab.meshSelection"), LocalizationManager.GetText("tab.export") };
             int newTab = GUILayout.Toolbar(selectedTab, tabNames);
             if (newTab != selectedTab)
             {
@@ -139,7 +146,7 @@ namespace MeshUVMaskGenerator
 
         private void DrawMeshSelectionTab()
         {
-            EditorGUILayout.LabelField("メッシュ選択", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(LocalizationManager.GetText("tab.meshSelection"), EditorStyles.boldLabel);
 
             if (meshAnalyzer.Mesh == null) return;
 
@@ -151,16 +158,16 @@ namespace MeshUVMaskGenerator
             EditorGUILayout.Space();
 
             // メッシュ選択状況表示
-            EditorGUILayout.LabelField($"選択中のメッシュ: {meshSelector.SelectedFaceCount:N0}");
+            EditorGUILayout.LabelField(string.Format(LocalizationManager.GetText("label.selectedMeshes"), meshSelector.SelectedFaceCount));
 
             if (meshSelector.SelectedFaceCount == 0)
             {
                 string materialName = meshAnalyzer.GetSelectedMaterialName();
-                EditorGUILayout.HelpBox($"メッシュ未選択。選択されたマテリアル「{materialName}」のサブメッシュが表示されます。", MessageType.Info);
+                EditorGUILayout.HelpBox(string.Format(LocalizationManager.GetText("help.noMeshSelected"), materialName), MessageType.Info);
             }
             else
             {
-                EditorGUILayout.HelpBox($"{meshSelector.SelectedFaceCount:N0}個のメッシュが選択されています。", MessageType.Info);
+                EditorGUILayout.HelpBox(string.Format(LocalizationManager.GetText("help.meshesSelected"), meshSelector.SelectedFaceCount), MessageType.Info);
             }
 
             EditorGUILayout.Space();
@@ -174,7 +181,7 @@ namespace MeshUVMaskGenerator
             DrawSelectionButtons();
 
             EditorGUILayout.Space();
-            EditorGUILayout.HelpBox("Scene Viewでメッシュをクリックして選択/解除", MessageType.Info);
+            EditorGUILayout.HelpBox(LocalizationManager.GetText("help.sceneViewInstruction"), MessageType.Info);
 
             if (EditorGUI.EndChangeCheck())
             {
@@ -184,24 +191,24 @@ namespace MeshUVMaskGenerator
 
         private void DrawExportTab()
         {
-            EditorGUILayout.LabelField("UV設定とエクスポート", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(LocalizationManager.GetText("label.uvSettingsAndExport"), EditorStyles.boldLabel);
 
             // UV設定セクション
-            EditorGUILayout.LabelField("UV設定", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(LocalizationManager.GetText("label.uvSettings"), EditorStyles.boldLabel);
 
             EditorGUI.BeginChangeCheck();
 
-            uvMaskGenerator.TextureSize = EditorGUILayout.IntPopup("テクスチャサイズ", uvMaskGenerator.TextureSize,
+            uvMaskGenerator.TextureSize = EditorGUILayout.IntPopup(LocalizationManager.GetText("label.textureSize"), uvMaskGenerator.TextureSize,
                 new string[] { "256", "512", "1024", "2048" },
                 new int[] { 256, 512, 1024, 2048 });
 
-            uvMaskGenerator.BackgroundColor = EditorGUILayout.ColorField("背景色", uvMaskGenerator.BackgroundColor);
-            uvMaskGenerator.MaskColor = EditorGUILayout.ColorField("マスク色", uvMaskGenerator.MaskColor);
-            uvMaskGenerator.FillPolygons = EditorGUILayout.Toggle("ポリゴン塗りつぶし", uvMaskGenerator.FillPolygons);
+            uvMaskGenerator.BackgroundColor = EditorGUILayout.ColorField(LocalizationManager.GetText("label.backgroundColor"), uvMaskGenerator.BackgroundColor);
+            uvMaskGenerator.MaskColor = EditorGUILayout.ColorField(LocalizationManager.GetText("label.maskColor"), uvMaskGenerator.MaskColor);
+            uvMaskGenerator.FillPolygons = EditorGUILayout.Toggle(LocalizationManager.GetText("label.fillPolygons"), uvMaskGenerator.FillPolygons);
 
             if (!uvMaskGenerator.FillPolygons)
             {
-                uvMaskGenerator.LineThickness = EditorGUILayout.Slider("線の太さ", uvMaskGenerator.LineThickness, 0.5f, 3.0f);
+                uvMaskGenerator.LineThickness = EditorGUILayout.Slider(LocalizationManager.GetText("label.lineThickness"), uvMaskGenerator.LineThickness, 0.5f, 3.0f);
             }
 
             if (EditorGUI.EndChangeCheck())
@@ -213,30 +220,30 @@ namespace MeshUVMaskGenerator
             EditorGUILayout.Space();
 
             // エクスポートセクション
-            EditorGUILayout.LabelField("エクスポート", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(LocalizationManager.GetText("label.export"), EditorStyles.boldLabel);
 
             if (previewTexture != null)
             {
-                EditorGUILayout.LabelField($"生成サイズ: {previewTexture.width}x{previewTexture.height}");
-                EditorGUILayout.LabelField($"メッシュ: {meshAnalyzer.Mesh.name}");
+                EditorGUILayout.LabelField(string.Format(LocalizationManager.GetText("label.generatedSize"), previewTexture.width, previewTexture.height));
+                EditorGUILayout.LabelField(string.Format(LocalizationManager.GetText("label.mesh"), meshAnalyzer.Mesh.name));
 
                 EditorGUILayout.Space();
 
-                if (GUILayout.Button("テクスチャを保存", GUILayout.Height(30)))
+                if (GUILayout.Button(LocalizationManager.GetText("button.saveTexture"), GUILayout.Height(30)))
                 {
                     SaveTexture();
                 }
             }
             else
             {
-                EditorGUILayout.HelpBox("プレビューが生成されていません。", MessageType.Info);
+                EditorGUILayout.HelpBox(LocalizationManager.GetText("help.previewNotGenerated"), MessageType.Info);
             }
         }
 
         private void DrawPreview()
         {
             EditorGUILayout.Space();
-            EditorGUILayout.LabelField("プレビュー", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(LocalizationManager.GetText("label.preview"), EditorStyles.boldLabel);
 
             if (previewTexture != null)
             {
@@ -252,7 +259,7 @@ namespace MeshUVMaskGenerator
                 float previewSize = windowWidth - 20f;
 
                 Rect previewRect = GUILayoutUtility.GetRect(previewSize, previewSize);
-                EditorGUILayout.HelpBox("プレビュー未生成", MessageType.Info);
+                EditorGUILayout.HelpBox(LocalizationManager.GetText("help.previewNotGenerated2"), MessageType.Info);
             }
         }
 
@@ -264,12 +271,12 @@ namespace MeshUVMaskGenerator
 
                 EditorGUILayout.BeginVertical(EditorStyles.helpBox);
 
-                EditorGUILayout.LabelField("新しいバージョンが利用可能です", EditorStyles.boldLabel);
+                EditorGUILayout.LabelField(LocalizationManager.GetText("header.newVersionAvailable"), EditorStyles.boldLabel);
 
                 string currentVersion = FileOperations.FormatVersion(FileOperations.GetPackageVersion());
-                EditorGUILayout.LabelField($"現在: {currentVersion} → 最新: {VersionUtility.FormatVersion(release.tag_name)}");
+                EditorGUILayout.LabelField(string.Format(LocalizationManager.GetText("label.currentToLatest"), currentVersion, VersionUtility.FormatVersion(release.tag_name)));
 
-                if (GUILayout.Button("リリースページを開く"))
+                if (GUILayout.Button(LocalizationManager.GetText("button.openReleasePage")))
                 {
                     ReleaseChecker.OpenReleasePage();
                 }
@@ -280,7 +287,7 @@ namespace MeshUVMaskGenerator
             else if (!string.IsNullOrEmpty(ReleaseChecker.CheckError))
             {
                 EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-                EditorGUILayout.LabelField($"アップデート確認に失敗: {ReleaseChecker.CheckError}", EditorStyles.wordWrappedLabel);
+                EditorGUILayout.LabelField(string.Format(LocalizationManager.GetText("error.updateCheckFailed"), ReleaseChecker.CheckError), EditorStyles.wordWrappedLabel);
                 EditorGUILayout.EndVertical();
                 EditorGUILayout.Space();
             }
@@ -293,11 +300,11 @@ namespace MeshUVMaskGenerator
             var materials = meshAnalyzer.GetMaterials();
             if (materials == null || materials.Length == 0) return;
 
-            EditorGUILayout.LabelField("マテリアル選択", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(LocalizationManager.GetText("label.materialSelection"), EditorStyles.boldLabel);
 
             EditorGUI.BeginChangeCheck();
 
-            showMaterialSelection = EditorGUILayout.Foldout(showMaterialSelection, $"マテリアル ({materials.Length}個)");
+            showMaterialSelection = EditorGUILayout.Foldout(showMaterialSelection, string.Format(LocalizationManager.GetText("label.materials"), materials.Length));
 
             if (showMaterialSelection)
             {
@@ -306,7 +313,7 @@ namespace MeshUVMaskGenerator
                     if (i < meshAnalyzer.Mesh.subMeshCount)
                     {
                         var subMesh = meshAnalyzer.Mesh.GetSubMesh(i);
-                        string matName = materials[i] != null ? materials[i].name : $"マテリアル {i}";
+                        string matName = materials[i] != null ? materials[i].name : string.Format(LocalizationManager.GetText("label.material"), i);
 
                         bool isSelected = meshAnalyzer.SelectedMaterialIndex == i;
                         bool newSelected = EditorGUILayout.Toggle(
@@ -321,7 +328,7 @@ namespace MeshUVMaskGenerator
                 }
 
                 string selectedMaterialName = meshAnalyzer.GetSelectedMaterialName();
-                EditorGUILayout.LabelField($"選択中: {selectedMaterialName}", EditorStyles.helpBox);
+                EditorGUILayout.LabelField(string.Format(LocalizationManager.GetText("label.selectedMaterial"), selectedMaterialName), EditorStyles.helpBox);
             }
 
             if (EditorGUI.EndChangeCheck())
@@ -335,7 +342,7 @@ namespace MeshUVMaskGenerator
 
         private void DrawSelectionModeControls()
         {
-            EditorGUILayout.LabelField("選択モード", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(LocalizationManager.GetText("label.selectionMode"), EditorStyles.boldLabel);
             EditorGUI.BeginChangeCheck();
 
             EditorGUILayout.BeginHorizontal();
@@ -345,7 +352,7 @@ namespace MeshUVMaskGenerator
             {
                 GUI.backgroundColor = new Color(0.5f, 0.8f, 1f, 1f);
             }
-            if (GUILayout.Button("個別メッシュ"))
+            if (GUILayout.Button(LocalizationManager.GetText("button.individualMesh")))
             {
                 meshSelector.SelectionMode = MeshSelectionMode.Individual;
             }
@@ -355,7 +362,7 @@ namespace MeshUVMaskGenerator
             {
                 GUI.backgroundColor = new Color(1f, 0.8f, 0.5f, 1f);
             }
-            if (GUILayout.Button("UVアイランド"))
+            if (GUILayout.Button(LocalizationManager.GetText("button.uvIsland")))
             {
                 meshSelector.SelectionMode = MeshSelectionMode.UVIsland;
             }
@@ -365,17 +372,17 @@ namespace MeshUVMaskGenerator
 
             if (meshSelector.SelectionMode == MeshSelectionMode.UVIsland)
             {
-                meshSelector.UVThreshold = EditorGUILayout.Slider("UV閾値", meshSelector.UVThreshold, 0.0001f, 0.01f);
+                meshSelector.UVThreshold = EditorGUILayout.Slider(LocalizationManager.GetText("label.uvThreshold"), meshSelector.UVThreshold, 0.0001f, 0.01f);
                 if (GUI.changed)
                 {
                     meshSelector.BuildUVIslands(meshAnalyzer.Mesh, meshAnalyzer.GetFaceToTriangles());
                     SceneView.RepaintAll();
                 }
-                EditorGUILayout.HelpBox("UVアイランドモード: 1つのメッシュをクリックするとUV空間で接続されたすべてのメッシュが選択されます", MessageType.Info);
+                EditorGUILayout.HelpBox(LocalizationManager.GetText("help.uvIslandMode"), MessageType.Info);
             }
             else
             {
-                EditorGUILayout.HelpBox("個別メッシュモード: クリックしたメッシュのみが選択されます", MessageType.Info);
+                EditorGUILayout.HelpBox(LocalizationManager.GetText("help.individualMode"), MessageType.Info);
             }
 
             EditorGUILayout.Space();
@@ -387,7 +394,7 @@ namespace MeshUVMaskGenerator
             {
                 GUI.backgroundColor = new Color(0.5f, 1f, 0.5f, 1f);
             }
-            if (GUILayout.Button("追加モード"))
+            if (GUILayout.Button(LocalizationManager.GetText("button.addMode")))
             {
                 meshSelector.AddToSelection = true;
             }
@@ -397,7 +404,7 @@ namespace MeshUVMaskGenerator
             {
                 GUI.backgroundColor = new Color(1f, 0.5f, 0.5f, 1f);
             }
-            if (GUILayout.Button("削除モード"))
+            if (GUILayout.Button(LocalizationManager.GetText("button.removeMode")))
             {
                 meshSelector.AddToSelection = false;
             }
@@ -413,21 +420,21 @@ namespace MeshUVMaskGenerator
 
         private void DrawSelectionButtons()
         {
-            if (GUILayout.Button("全選択"))
+            if (GUILayout.Button(LocalizationManager.GetText("button.selectAll")))
             {
                 meshSelector.SelectAll(meshAnalyzer.GetFaceToTriangles());
                 parametersChanged = true;
                 SceneView.RepaintAll();
             }
 
-            if (GUILayout.Button("選択解除"))
+            if (GUILayout.Button(LocalizationManager.GetText("button.clearSelection")))
             {
                 meshSelector.ClearSelection();
                 parametersChanged = true;
                 SceneView.RepaintAll();
             }
 
-            if (GUILayout.Button("選択反転"))
+            if (GUILayout.Button(LocalizationManager.GetText("button.invertSelection")))
             {
                 meshSelector.InvertSelection(meshAnalyzer.GetFaceToTriangles());
                 parametersChanged = true;
@@ -486,6 +493,26 @@ namespace MeshUVMaskGenerator
             int materialIndex = meshAnalyzer.SelectedMaterialIndex;
 
             FileOperations.SaveTexture(previewTexture, meshName, materialName, materialIndex);
+        }
+
+        private void DrawHeader()
+        {
+            EditorGUILayout.BeginHorizontal();
+            
+            // タイトル
+            EditorGUILayout.LabelField(LocalizationManager.GetText("window.title"), EditorStyles.boldLabel);
+            
+            GUILayout.FlexibleSpace();
+            
+            // 言語選択
+            EditorGUI.BeginChangeCheck();
+            int languageIndex = EditorGUILayout.Popup(LocalizationManager.GetLanguageIndex(), LocalizationManager.GetLanguageDisplayNames(), GUILayout.Width(80));
+            if (EditorGUI.EndChangeCheck())
+            {
+                LocalizationManager.SetLanguageByIndex(languageIndex);
+            }
+            
+            EditorGUILayout.EndHorizontal();
         }
     }
 }

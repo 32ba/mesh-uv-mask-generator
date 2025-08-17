@@ -187,7 +187,7 @@ namespace MeshUVMaskGenerator
             {
                 return materials[SelectedMaterialIndex].name;
             }
-            return $"マテリアル {SelectedMaterialIndex}";
+            return string.Format(LocalizationManager.GetText("label.material"), SelectedMaterialIndex);
         }
     }
 }
