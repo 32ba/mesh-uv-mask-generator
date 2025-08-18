@@ -223,6 +223,20 @@ namespace MeshUVMaskGenerator
                     [SupportedLanguage.English] = "Line Thickness",
                     [SupportedLanguage.Korean] = "선 두께"
                 },
+                
+                ["label.dilationPixels"] = new Dictionary<SupportedLanguage, string>
+                {
+                    [SupportedLanguage.Japanese] = "拡張ピクセル数",
+                    [SupportedLanguage.English] = "Dilation Pixels",
+                    [SupportedLanguage.Korean] = "확장 픽셀 수"
+                },
+                
+                ["label.outputChannel"] = new Dictionary<SupportedLanguage, string>
+                {
+                    [SupportedLanguage.Japanese] = "出力チャネル",
+                    [SupportedLanguage.English] = "Output Channel",
+                    [SupportedLanguage.Korean] = "출력 채널"
+                },
 
                 // エクスポート
                 ["label.export"] = new Dictionary<SupportedLanguage, string>

@@ -3,6 +3,14 @@ using System.Collections.Generic;
 
 namespace MeshUVMaskGenerator
 {
+    public enum MaskChannel
+    {
+        Red,
+        Green,
+        Blue,
+        Alpha,
+        RGBA
+    }
     public class UVMaskGenerator
     {
         public int TextureSize { get; set; } = 1024;
@@ -10,6 +18,8 @@ namespace MeshUVMaskGenerator
         public Color MaskColor { get; set; } = Color.black;
         public bool FillPolygons { get; set; } = true;
         public float LineThickness { get; set; } = 1.0f;
+        public int DilationPixels { get; set; } = 0;
+        public MaskChannel OutputChannel { get; set; } = MaskChannel.RGBA;
 
         public Texture2D GenerateUVMask(Mesh mesh, int[] triangles)
         {
@@ -19,8 +29,10 @@ namespace MeshUVMaskGenerator
             Texture2D texture = new Texture2D(TextureSize, TextureSize, TextureFormat.RGBA32, false);
             
             Color[] pixels = new Color[TextureSize * TextureSize];
+            // Initialize based on output channel
+            Color initialColor = (OutputChannel == MaskChannel.RGBA) ? BackgroundColor : Color.clear;
             for (int i = 0; i < pixels.Length; i++)
-                pixels[i] = BackgroundColor;
+                pixels[i] = initialColor;
 
             Vector2[] uvs = mesh.uv;
             if (uvs == null || uvs.Length == 0)
@@ -37,6 +49,11 @@ namespace MeshUVMaskGenerator
             else
             {
                 DrawWireframeTriangles(pixels, uvs, triangles);
+            }
+
+            if (DilationPixels > 0)
+            {
+                pixels = ApplyDilation(pixels, TextureSize, DilationPixels);
             }
 
             texture.SetPixels(pixels);
@@ -88,7 +105,10 @@ namespace MeshUVMaskGenerator
                 for (int x = minX; x <= maxX; x++)
                 {
                     if (IsPointInTriangle(x, y, x0, y0, x1, y1, x2, y2))
-                        pixels[y * size + x] = color;
+                    {
+                        int index = y * size + x;
+                        pixels[index] = ApplyChannelMask(pixels[index], color);
+                    }
                 }
             }
         }
@@ -149,9 +169,137 @@ namespace MeshUVMaskGenerator
                         int py = y + dy;
 
                         if (px >= 0 && px < size && py >= 0 && py < size)
-                            pixels[py * size + px] = color;
+                        {
+                            int index = py * size + px;
+                            pixels[index] = ApplyChannelMask(pixels[index], color);
+                        }
                     }
                 }
+            }
+        }
+
+        private Color[] ApplyDilation(Color[] originalPixels, int size, int dilationPixels)
+        {
+            if (dilationPixels <= 0) return originalPixels;
+
+            // Distance transform approach - much more efficient
+            float[] distanceMap = new float[originalPixels.Length];
+            
+            // Initialize distance map
+            for (int i = 0; i < originalPixels.Length; i++)
+            {
+                distanceMap[i] = IsBackgroundColor(originalPixels[i]) ? float.MaxValue : 0f;
+            }
+
+            // Forward pass
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    int index = y * size + x;
+                    
+                    if (distanceMap[index] > 0)
+                    {
+                        // Check left and top neighbors
+                        if (x > 0)
+                        {
+                            float leftDist = distanceMap[index - 1] + 1f;
+                            if (leftDist < distanceMap[index])
+                                distanceMap[index] = leftDist;
+                        }
+                        
+                        if (y > 0)
+                        {
+                            float topDist = distanceMap[index - size] + 1f;
+                            if (topDist < distanceMap[index])
+                                distanceMap[index] = topDist;
+                        }
+                    }
+                }
+            }
+
+            // Backward pass
+            for (int y = size - 1; y >= 0; y--)
+            {
+                for (int x = size - 1; x >= 0; x--)
+                {
+                    int index = y * size + x;
+                    
+                    if (distanceMap[index] > 0)
+                    {
+                        // Check right and bottom neighbors
+                        if (x < size - 1)
+                        {
+                            float rightDist = distanceMap[index + 1] + 1f;
+                            if (rightDist < distanceMap[index])
+                                distanceMap[index] = rightDist;
+                        }
+                        
+                        if (y < size - 1)
+                        {
+                            float bottomDist = distanceMap[index + size] + 1f;
+                            if (bottomDist < distanceMap[index])
+                                distanceMap[index] = bottomDist;
+                        }
+                    }
+                }
+            }
+
+            // Create result based on distance threshold
+            Color[] result = new Color[originalPixels.Length];
+            for (int i = 0; i < originalPixels.Length; i++)
+            {
+                if (distanceMap[i] <= dilationPixels)
+                {
+                    result[i] = ApplyChannelMask(originalPixels[i], MaskColor);
+                }
+                else
+                {
+                    result[i] = ApplyChannelMask(originalPixels[i], BackgroundColor);
+                }
+            }
+
+            return result;
+        }
+
+        private bool IsBackgroundColor(Color color)
+        {
+            float threshold = 0.01f;
+            return Mathf.Abs(color.r - BackgroundColor.r) < threshold &&
+                   Mathf.Abs(color.g - BackgroundColor.g) < threshold &&
+                   Mathf.Abs(color.b - BackgroundColor.b) < threshold &&
+                   Mathf.Abs(color.a - BackgroundColor.a) < threshold;
+        }
+
+        private Color ApplyChannelMask(Color baseColor, Color maskColor)
+        {
+            switch (OutputChannel)
+            {
+                case MaskChannel.Red:
+                    // Red channel only: white(1.0) for mask, transparent for background
+                    if (IsBackgroundColor(maskColor))
+                        return Color.clear; // Transparent background
+                    else
+                        return new Color(1f, 0f, 0f, 1f); // Red mask
+                case MaskChannel.Green:
+                    if (IsBackgroundColor(maskColor))
+                        return Color.clear;
+                    else
+                        return new Color(0f, 1f, 0f, 1f); // Green mask
+                case MaskChannel.Blue:
+                    if (IsBackgroundColor(maskColor))
+                        return Color.clear;
+                    else
+                        return new Color(0f, 0f, 1f, 1f); // Blue mask
+                case MaskChannel.Alpha:
+                    if (IsBackgroundColor(maskColor))
+                        return Color.clear;
+                    else
+                        return new Color(0f, 0f, 0f, 1f); // Opaque mask
+                case MaskChannel.RGBA:
+                default:
+                    // Full color mode uses the actual colors
+                    return maskColor;
             }
         }
     }

@@ -65,7 +65,7 @@ namespace MeshUVMaskGenerator
         private void OnSelectionChanged()
         {
             bool meshChanged = meshAnalyzer.SetGameObject(Selection.activeGameObject);
-            
+
             if (meshChanged)
             {
                 meshSelector.ClearSelection();
@@ -202,14 +202,23 @@ namespace MeshUVMaskGenerator
                 new string[] { "256", "512", "1024", "2048" },
                 new int[] { 256, 512, 1024, 2048 });
 
+            uvMaskGenerator.OutputChannel = (MaskChannel)EditorGUILayout.EnumPopup(LocalizationManager.GetText("label.outputChannel"), uvMaskGenerator.OutputChannel);
+
+            // Color settings only for RGBA mode
+            bool isColorModeEnabled = uvMaskGenerator.OutputChannel == MaskChannel.RGBA;
+            
+            EditorGUI.BeginDisabledGroup(!isColorModeEnabled);
             uvMaskGenerator.BackgroundColor = EditorGUILayout.ColorField(LocalizationManager.GetText("label.backgroundColor"), uvMaskGenerator.BackgroundColor);
             uvMaskGenerator.MaskColor = EditorGUILayout.ColorField(LocalizationManager.GetText("label.maskColor"), uvMaskGenerator.MaskColor);
+            EditorGUI.EndDisabledGroup();
             uvMaskGenerator.FillPolygons = EditorGUILayout.Toggle(LocalizationManager.GetText("label.fillPolygons"), uvMaskGenerator.FillPolygons);
 
             if (!uvMaskGenerator.FillPolygons)
             {
                 uvMaskGenerator.LineThickness = EditorGUILayout.Slider(LocalizationManager.GetText("label.lineThickness"), uvMaskGenerator.LineThickness, 0.5f, 3.0f);
             }
+
+            uvMaskGenerator.DilationPixels = EditorGUILayout.IntSlider(LocalizationManager.GetText("label.dilationPixels"), uvMaskGenerator.DilationPixels, 0, 5);
 
             if (EditorGUI.EndChangeCheck())
             {
@@ -498,12 +507,12 @@ namespace MeshUVMaskGenerator
         private void DrawHeader()
         {
             EditorGUILayout.BeginHorizontal();
-            
+
             // タイトル
             EditorGUILayout.LabelField(LocalizationManager.GetText("window.title"), EditorStyles.boldLabel);
-            
+
             GUILayout.FlexibleSpace();
-            
+
             // 言語選択
             EditorGUI.BeginChangeCheck();
             int languageIndex = EditorGUILayout.Popup(LocalizationManager.GetLanguageIndex(), LocalizationManager.GetLanguageDisplayNames(), GUILayout.Width(80));
@@ -511,7 +520,7 @@ namespace MeshUVMaskGenerator
             {
                 LocalizationManager.SetLanguageByIndex(languageIndex);
             }
-            
+
             EditorGUILayout.EndHorizontal();
         }
     }
