@@ -76,7 +76,7 @@ namespace MeshUVMaskGenerator
             }
             else
             {
-                Debug.Log($"[Mesh UV Mask Generator] バージョンは最新です (現在: {currentVersion})");
+                Debug.Log(string.Format(LocalizationManager.GetText("log.versionIsLatest"), currentVersion));
             }
 
             OnUpdateCheckCompleted?.Invoke();

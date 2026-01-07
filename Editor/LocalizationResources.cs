@@ -385,6 +385,13 @@ namespace MeshUVMaskGenerator
                     [SupportedLanguage.Japanese] = "[Mesh UV Mask Generator] アップデート確認をスキップしました。次回チェック予定: {0}",
                     [SupportedLanguage.English] = "[Mesh UV Mask Generator] Update check skipped. Next check scheduled: {0}",
                     [SupportedLanguage.Korean] = "[Mesh UV Mask Generator] 업데이트 확인을 건너뛰었습니다. 다음 확인 예정: {0}"
+                },
+
+                ["log.versionIsLatest"] = new Dictionary<SupportedLanguage, string>
+                {
+                    [SupportedLanguage.Japanese] = "[Mesh UV Mask Generator] バージョンは最新です (現在: {0})",
+                    [SupportedLanguage.English] = "[Mesh UV Mask Generator] Version is up to date (current: {0})",
+                    [SupportedLanguage.Korean] = "[Mesh UV Mask Generator] 버전이 최신입니다 (현재: {0})"
                 }
             };
 
