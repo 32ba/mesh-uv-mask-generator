@@ -191,13 +191,15 @@ namespace MeshUVMaskGenerator
         {
             if (dilationPixels <= 0) return originalPixels;
 
+            Color effectiveBg = GetEffectiveBackgroundColor();
+
             // Distance transform approach - much more efficient
             float[] distanceMap = new float[originalPixels.Length];
-            
+
             // Initialize distance map
             for (int i = 0; i < originalPixels.Length; i++)
             {
-                distanceMap[i] = IsBackgroundColor(originalPixels[i]) ? float.MaxValue : 0f;
+                distanceMap[i] = IsBackgroundColor(originalPixels[i], effectiveBg) ? float.MaxValue : 0f;
             }
 
             // Forward pass
@@ -277,6 +279,8 @@ namespace MeshUVMaskGenerator
             float dirX = Mathf.Cos(rad);
             float dirY = Mathf.Sin(rad);
 
+            Color effectiveBg = GetEffectiveBackgroundColor();
+
             // Find projection min/max over mask pixels only
             float projMin = float.MaxValue;
             float projMax = float.MinValue;
@@ -287,7 +291,7 @@ namespace MeshUVMaskGenerator
                 for (int x = 0; x < size; x++)
                 {
                     int index = y * size + x;
-                    if (!IsBackgroundColor(pixels[index]))
+                    if (!IsBackgroundColor(pixels[index], effectiveBg))
                     {
                         float proj = x * dirX + y * dirY;
                         if (proj < projMin) projMin = proj;
@@ -303,14 +307,13 @@ namespace MeshUVMaskGenerator
             float range = projMax - projMin;
 
             Color[] result = new Color[pixels.Length];
-            Color bgColor = (OutputChannel == MaskChannel.RGBA) ? BackgroundColor : Color.clear;
 
             for (int y = 0; y < size; y++)
             {
                 for (int x = 0; x < size; x++)
                 {
                     int index = y * size + x;
-                    if (IsBackgroundColor(pixels[index]))
+                    if (IsBackgroundColor(pixels[index], effectiveBg))
                     {
                         result[index] = pixels[index];
                     }
@@ -349,13 +352,23 @@ namespace MeshUVMaskGenerator
             return result;
         }
 
+        private Color GetEffectiveBackgroundColor()
+        {
+            return (OutputChannel == MaskChannel.RGBA) ? BackgroundColor : Color.clear;
+        }
+
         private bool IsBackgroundColor(Color color)
         {
+            return IsBackgroundColor(color, BackgroundColor);
+        }
+
+        private bool IsBackgroundColor(Color color, Color referenceBackground)
+        {
             float threshold = 0.01f;
-            return Mathf.Abs(color.r - BackgroundColor.r) < threshold &&
-                   Mathf.Abs(color.g - BackgroundColor.g) < threshold &&
-                   Mathf.Abs(color.b - BackgroundColor.b) < threshold &&
-                   Mathf.Abs(color.a - BackgroundColor.a) < threshold;
+            return Mathf.Abs(color.r - referenceBackground.r) < threshold &&
+                   Mathf.Abs(color.g - referenceBackground.g) < threshold &&
+                   Mathf.Abs(color.b - referenceBackground.b) < threshold &&
+                   Mathf.Abs(color.a - referenceBackground.a) < threshold;
         }
 
         private Color ApplyChannelMask(Color baseColor, Color maskColor)
