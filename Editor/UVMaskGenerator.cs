@@ -20,6 +20,10 @@ namespace MeshUVMaskGenerator
         public float LineThickness { get; set; } = 1.0f;
         public int DilationPixels { get; set; } = 0;
         public MaskChannel OutputChannel { get; set; } = MaskChannel.RGBA;
+        public bool EnableGradient { get; set; } = false;
+        public float GradientAngle { get; set; } = 0f;
+        public float GradientStart { get; set; } = 0f;
+        public float GradientEnd { get; set; } = 1f;
 
         public Texture2D GenerateUVMask(Mesh mesh, int[] triangles)
         {
@@ -54,6 +58,11 @@ namespace MeshUVMaskGenerator
             if (DilationPixels > 0)
             {
                 pixels = ApplyDilation(pixels, TextureSize, DilationPixels);
+            }
+
+            if (EnableGradient)
+            {
+                pixels = ApplyGradient(pixels, TextureSize);
             }
 
             texture.SetPixels(pixels);
@@ -256,6 +265,84 @@ namespace MeshUVMaskGenerator
                 else
                 {
                     result[i] = ApplyChannelMask(originalPixels[i], BackgroundColor);
+                }
+            }
+
+            return result;
+        }
+
+        private Color[] ApplyGradient(Color[] pixels, int size)
+        {
+            float rad = GradientAngle * Mathf.Deg2Rad;
+            float dirX = Mathf.Cos(rad);
+            float dirY = Mathf.Sin(rad);
+
+            // Find projection min/max over mask pixels only
+            float projMin = float.MaxValue;
+            float projMax = float.MinValue;
+            bool hasMask = false;
+
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    int index = y * size + x;
+                    if (!IsBackgroundColor(pixels[index]))
+                    {
+                        float proj = x * dirX + y * dirY;
+                        if (proj < projMin) projMin = proj;
+                        if (proj > projMax) projMax = proj;
+                        hasMask = true;
+                    }
+                }
+            }
+
+            if (!hasMask || Mathf.Approximately(projMin, projMax))
+                return pixels;
+
+            float range = projMax - projMin;
+
+            Color[] result = new Color[pixels.Length];
+            Color bgColor = (OutputChannel == MaskChannel.RGBA) ? BackgroundColor : Color.clear;
+
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    int index = y * size + x;
+                    if (IsBackgroundColor(pixels[index]))
+                    {
+                        result[index] = pixels[index];
+                    }
+                    else
+                    {
+                        float proj = x * dirX + y * dirY;
+                        float tRaw = (proj - projMin) / range;
+                        float gradientRange = GradientEnd - GradientStart;
+                        float t = gradientRange > 0f
+                            ? Mathf.Clamp01((tRaw - GradientStart) / gradientRange)
+                            : (tRaw >= GradientEnd ? 1f : 0f);
+
+                        switch (OutputChannel)
+                        {
+                            case MaskChannel.Red:
+                                result[index] = Color.Lerp(Color.clear, new Color(1f, 0f, 0f, 1f), t);
+                                break;
+                            case MaskChannel.Green:
+                                result[index] = Color.Lerp(Color.clear, new Color(0f, 1f, 0f, 1f), t);
+                                break;
+                            case MaskChannel.Blue:
+                                result[index] = Color.Lerp(Color.clear, new Color(0f, 0f, 1f, 1f), t);
+                                break;
+                            case MaskChannel.Alpha:
+                                result[index] = Color.Lerp(Color.clear, new Color(0f, 0f, 0f, 1f), t);
+                                break;
+                            case MaskChannel.RGBA:
+                            default:
+                                result[index] = Color.Lerp(BackgroundColor, MaskColor, t);
+                                break;
+                        }
+                    }
                 }
             }
 
