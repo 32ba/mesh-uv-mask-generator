@@ -8,13 +8,13 @@ namespace MeshUVMaskGenerator
     [InitializeOnLoad]
     public class ReleaseChecker
     {
-        private const string REPOSITORY_OWNER = "32ba";
-        private const string REPOSITORY_NAME = "mesh-uv-mask-generator";
+        private const string PACKAGE_ID = "net.32ba.mesh-uv-mask-generator";
+        private const string RELEASE_PAGE_URL = "https://github.com/32ba/mesh-uv-mask-generator/releases";
         private const string LAST_CHECK_KEY = "MeshUVMaskGenerator_LastVersionCheck";
 
-        private static readonly GitHubApiClient apiClient = new GitHubApiClient(REPOSITORY_OWNER, REPOSITORY_NAME);
+        private static readonly VpmApiClient apiClient = new VpmApiClient(PACKAGE_ID);
 
-        public static GitHubRelease LatestRelease { get; private set; }
+        public static string LatestVersion { get; private set; }
         public static bool HasNewVersion { get; private set; }
         public static bool IsChecking { get; private set; }
         public static string CheckError { get; private set; }
@@ -45,26 +45,25 @@ namespace MeshUVMaskGenerator
 
         private static IEnumerator CheckForUpdatesCoroutine(bool forceCheck)
         {
-            yield return apiClient.GetLatestReleaseCoroutine(
-                onComplete: (release) => HandleReleaseResponse(release, forceCheck),
+            yield return apiClient.GetLatestVersionCoroutine(
+                onComplete: (version) => HandleVersionResponse(version, forceCheck),
                 onError: (error) => HandleError(error, forceCheck)
             );
         }
 
-        private static void HandleReleaseResponse(GitHubRelease release, bool forceCheck)
+        private static void HandleVersionResponse(string latestVersion, bool forceCheck)
         {
             IsChecking = false;
 
-            if (release == null)
+            if (string.IsNullOrEmpty(latestVersion))
             {
-                CheckError = "Failed to get release information";
+                CheckError = "Failed to get version information";
                 OnUpdateCheckCompleted?.Invoke();
                 return;
             }
 
-            LatestRelease = release;
+            LatestVersion = latestVersion;
             string currentVersion = GetCurrentVersion();
-            string latestVersion = release.tag_name;
 
             // 最後のチェック時刻を更新
             EditorPrefs.SetString(LAST_CHECK_KEY, DateTime.Now.ToBinary().ToString());
@@ -86,17 +85,14 @@ namespace MeshUVMaskGenerator
         {
             IsChecking = false;
             CheckError = error;
-            Debug.LogWarning(string.Format(LocalizationManager.GetText("log.updateCheckFailed"), error));
+            Debug.Log(string.Format(LocalizationManager.GetText("log.updateCheckFailed"), error));
             OnUpdateCheckCompleted?.Invoke();
         }
 
 
         public static void OpenReleasePage()
         {
-            if (LatestRelease != null && !string.IsNullOrEmpty(LatestRelease.html_url))
-            {
-                Application.OpenURL(LatestRelease.html_url);
-            }
+            Application.OpenURL(RELEASE_PAGE_URL);
         }
 
         private static bool ShouldCheckForUpdates()

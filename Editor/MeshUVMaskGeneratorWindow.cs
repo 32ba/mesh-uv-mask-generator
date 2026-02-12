@@ -274,29 +274,20 @@ namespace MeshUVMaskGenerator
 
         private void DrawUpdateNotification()
         {
-            if (ReleaseChecker.HasNewVersion && ReleaseChecker.LatestRelease != null)
+            if (ReleaseChecker.HasNewVersion && !string.IsNullOrEmpty(ReleaseChecker.LatestVersion))
             {
-                var release = ReleaseChecker.LatestRelease;
-
                 EditorGUILayout.BeginVertical(EditorStyles.helpBox);
 
                 EditorGUILayout.LabelField(LocalizationManager.GetText("header.newVersionAvailable"), EditorStyles.boldLabel);
 
                 string currentVersion = FileOperations.FormatVersion(FileOperations.GetPackageVersion());
-                EditorGUILayout.LabelField(string.Format(LocalizationManager.GetText("label.currentToLatest"), currentVersion, VersionUtility.FormatVersion(release.tag_name)));
+                EditorGUILayout.LabelField(string.Format(LocalizationManager.GetText("label.currentToLatest"), currentVersion, VersionUtility.FormatVersion(ReleaseChecker.LatestVersion)));
 
                 if (GUILayout.Button(LocalizationManager.GetText("button.openReleasePage")))
                 {
                     ReleaseChecker.OpenReleasePage();
                 }
 
-                EditorGUILayout.EndVertical();
-                EditorGUILayout.Space();
-            }
-            else if (!string.IsNullOrEmpty(ReleaseChecker.CheckError))
-            {
-                EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-                EditorGUILayout.LabelField(string.Format(LocalizationManager.GetText("error.updateCheckFailed"), ReleaseChecker.CheckError), EditorStyles.wordWrappedLabel);
                 EditorGUILayout.EndVertical();
                 EditorGUILayout.Space();
             }
