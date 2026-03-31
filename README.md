@@ -23,7 +23,7 @@ Unity エディタ拡張で、選択したメッシュの UV レイアウトか�
 ## インストール
 
 ### VPM
-1. (https://vpm.32ba.net)[https://vpm.32ba.net]を開く
+1. [https://vpm.32ba.net](https://vpm.32ba.net)を開く
 2. `Add to VCC`でVCCに追加
 3. VCCから`Mesh UV Mask Generator`を検索してインストール
 
