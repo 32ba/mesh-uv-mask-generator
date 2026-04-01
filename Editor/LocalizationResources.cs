@@ -230,7 +230,35 @@ namespace MeshUVMaskGenerator
                     [SupportedLanguage.English] = "Dilation Pixels",
                     [SupportedLanguage.Korean] = "확장 픽셀 수"
                 },
-                
+
+                ["label.enableGradient"] = new Dictionary<SupportedLanguage, string>
+                {
+                    [SupportedLanguage.Japanese] = "グラデーション有効",
+                    [SupportedLanguage.English] = "Enable Gradient",
+                    [SupportedLanguage.Korean] = "그라디언트 활성화"
+                },
+
+                ["label.gradientAngle"] = new Dictionary<SupportedLanguage, string>
+                {
+                    [SupportedLanguage.Japanese] = "グラデーション角度",
+                    [SupportedLanguage.English] = "Gradient Angle",
+                    [SupportedLanguage.Korean] = "그라디언트 각도"
+                },
+
+                ["label.gradientStart"] = new Dictionary<SupportedLanguage, string>
+                {
+                    [SupportedLanguage.Japanese] = "グラデーション開始",
+                    [SupportedLanguage.English] = "Gradient Start",
+                    [SupportedLanguage.Korean] = "그라디언트 시작"
+                },
+
+                ["label.gradientEnd"] = new Dictionary<SupportedLanguage, string>
+                {
+                    [SupportedLanguage.Japanese] = "グラデーション終了",
+                    [SupportedLanguage.English] = "Gradient End",
+                    [SupportedLanguage.Korean] = "그라디언트 끝"
+                },
+
                 ["label.outputChannel"] = new Dictionary<SupportedLanguage, string>
                 {
                     [SupportedLanguage.Japanese] = "出力チャネル",

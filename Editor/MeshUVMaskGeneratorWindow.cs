@@ -220,6 +220,15 @@ namespace MeshUVMaskGenerator
 
             uvMaskGenerator.DilationPixels = EditorGUILayout.IntSlider(LocalizationManager.GetText("label.dilationPixels"), uvMaskGenerator.DilationPixels, 0, 5);
 
+            uvMaskGenerator.EnableGradient = EditorGUILayout.Toggle(LocalizationManager.GetText("label.enableGradient"), uvMaskGenerator.EnableGradient);
+
+            if (uvMaskGenerator.EnableGradient)
+            {
+                uvMaskGenerator.GradientAngle = EditorGUILayout.Slider(LocalizationManager.GetText("label.gradientAngle"), uvMaskGenerator.GradientAngle, 0f, 360f);
+                uvMaskGenerator.GradientStart = EditorGUILayout.Slider(LocalizationManager.GetText("label.gradientStart"), uvMaskGenerator.GradientStart, 0f, 1f);
+                uvMaskGenerator.GradientEnd = EditorGUILayout.Slider(LocalizationManager.GetText("label.gradientEnd"), uvMaskGenerator.GradientEnd, 0f, 1f);
+            }
+
             if (EditorGUI.EndChangeCheck())
             {
                 parametersChanged = true;
